@@ -1,0 +1,21 @@
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 本地配置与密钥（含 LLM API key，严禁入库）
+.env
+
+# 运行产物（每次运行自动生成,断点在 runtime/jobs）
+runtime/
+*.log
+
+# 工具二进制与下载存档（体积大，不入库；由 tools/downloads/fetch_all.py 重新获取）
+tools/bin/*.exe
+tools/bin/*.bat
+tools/foundry/
+tools/jadx/
+tools/sqlmap/
+tools/downloads/*.zip
+
+# 会话记录
+.pi-sessions/
