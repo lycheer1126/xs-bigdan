@@ -217,7 +217,7 @@ JWT 爆破/伪造成功后:
   → 爆破成功 → 伪造 Token → 再次泛查询 → 更大范围数据泄露
 
 判定: 单独 JWT 爆破=中危, 闭环打通=高危
-关联: `references/decision-trees.md` §23 JWT↔泛查询闭环
+关联: `references/decision-trees/23-filter-bypass.md` §23 JWT↔泛查询闭环
 ```
 
 ---

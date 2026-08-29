@@ -307,10 +307,14 @@ class ValuePool:
         for param_name, param_data in data.items():
             entries: list[ValueEntry] = []
             for raw in param_data.get("values", []):
+                try:
+                    status = ValueStatus(raw.get("status", "pending"))
+                except ValueError:
+                    status = ValueStatus.PENDING  # Agent 手写 status 拼写偏差容错
                 entries.append(
                     ValueEntry(
                         value=raw.get("value", ""),
-                        status=ValueStatus(raw.get("status", "pending")),
+                        status=status,
                         discovered_at=raw.get("discovered_at", ""),
                         source_endpoint=raw.get("source_endpoint", ""),
                         source_param=raw.get("source_param", param_name),
@@ -637,12 +641,22 @@ def check_js_analysis_completeness(endpoint_params: dict, min_endpoints: int = 3
     if meta.total_endpoints_extracted < min_endpoints:
         failures.append(f"total_endpoints_extracted = {meta.total_endpoints_extracted} < min {min_endpoints}")
     missing_fields: list[str] = []
-    for endpoint_name, endpoint_info in endpoints.items():
-        if not isinstance(endpoint_info, dict):
-            continue
-        for field_name in REQUIRED_ENDPOINT_FIELDS:
-            if not endpoint_info.get(field_name):
-                missing_fields.append(f"{endpoint_name}: missing '{field_name}'")
+    if isinstance(endpoints, list):
+        # xs-bigdan list 契约: [{"path": ..., "method": ..., "source_files": ...}]
+        for item in endpoints:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("path") or item.get("endpoint") or "?"
+            for field_name in REQUIRED_ENDPOINT_FIELDS:
+                if not item.get(field_name):
+                    missing_fields.append(f"{name}: missing '{field_name}'")
+    else:
+        for endpoint_name, endpoint_info in endpoints.items():
+            if not isinstance(endpoint_info, dict):
+                continue
+            for field_name in REQUIRED_ENDPOINT_FIELDS:
+                if not endpoint_info.get(field_name):
+                    missing_fields.append(f"{endpoint_name}: missing '{field_name}'")
     if missing_fields:
         failures.append(f"{len(missing_fields)} endpoints have missing required fields")
         for missing in missing_fields[:5]:

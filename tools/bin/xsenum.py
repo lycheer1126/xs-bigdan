@@ -34,19 +34,22 @@ import urllib.request
 from pathlib import Path
 
 
-def _fetch(url: str, method: str, ctx: ssl.SSLContext, timeout: float) -> tuple:
+def _fetch(url: str, method: str, ctx: ssl.SSLContext, timeout: float, retries: int = 2) -> tuple:
+    """连接失败(重置/超时)自动重试——间歇性重置的目标(qdedu 类)否则整表被误标异常。"""
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=ctx))
-    req = urllib.request.Request(url, method=method, headers={"User-Agent": "xs-bigdan/0.1 (authorized pentest agent)"})
     t0 = time.monotonic()
-    try:
-        r = opener.open(req, timeout=timeout)
-        body = r.read()
-        return r.status, len(body), time.monotonic() - t0
-    except urllib.error.HTTPError as e:
-        body = e.read()
-        return e.code, len(body), time.monotonic() - t0
-    except Exception as e:  # noqa: BLE001
-        return 0, 0, time.monotonic() - t0
+    for attempt in range(retries + 1):
+        req = urllib.request.Request(url, method=method, headers={"User-Agent": "xs-bigdan/0.1 (authorized pentest agent)"})
+        try:
+            r = opener.open(req, timeout=timeout)
+            body = r.read()
+            return r.status, len(body), time.monotonic() - t0
+        except urllib.error.HTTPError as e:
+            body = e.read()
+            return e.code, len(body), time.monotonic() - t0
+        except Exception:  # noqa: BLE001 — 连接重置/超时,退避后重试
+            time.sleep(min(2.0, 0.5 * (attempt + 1)))
+    return 0, 0, time.monotonic() - t0
 
 
 def main() -> int:
@@ -87,7 +90,9 @@ def main() -> int:
             w = futs[fut]
             code, length, elapsed = fut.result()
             flag = ""
-            if w == "/":
+            if code == 0:
+                flag = "[net-err]"  # 连接失败(重试后仍不通): 单列,不计入异常
+            elif w == "/":
                 flag = "base"
             elif code != base_code and abs(length - base_len) > max(15, base_len * 0.15):
                 flag = "[!] 异常"
@@ -97,13 +102,15 @@ def main() -> int:
                 flag = "[!] 长度偏差"
             rows.append((code, length, elapsed, w, flag))
 
-    # 异常优先，再按状态码
-    rows.sort(key=lambda r: (0 if r[4] else 1, r[0]))
-    n_abnormal = sum(1 for r in rows if r[4])
+    # 异常优先，再按状态码；net-err 沉底(网络噪音不是发现)
+    rows.sort(key=lambda r: (0 if (r[4] and r[4] != "[net-err]") else (2 if r[4] == "[net-err]" else 1), r[0]))
+    n_abnormal = sum(1 for r in rows if r[4] and r[4] != "[net-err]")
+    n_neterr = sum(1 for r in rows if r[4] == "[net-err]")
     for code, length, elapsed, w, flag in rows:
         print(f"{code:<5} {length:<6} {elapsed:.2f}s {w:<40} {flag}")
 
-    print(f"--- {n_abnormal}/{len(rows)} 异常项（非404 或 长度偏离基线），优先看这些 ---")
+    print(f"--- {n_abnormal}/{len(rows)} 异常项（非404 或 长度偏离基线），优先看这些 ---"
+          + (f" 另有 {n_neterr} 项连接失败(net-err,目标不稳/限速,建议 --concurrency 1 慢扫)" if n_neterr else ""))
     return 0
 
 

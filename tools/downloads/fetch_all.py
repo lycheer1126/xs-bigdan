@@ -10,6 +10,7 @@ JOBS = [
     ("jadx.zip",  "https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip"),
     ("foundry.zip","https://github.com/foundry-rs/foundry/releases/download/v1.7.1/foundry_v1.7.1_win_amd64.zip"),
     ("strings.zip","https://download.sysinternals.com/files/Strings.zip"),
+    ("ehole.zip", "https://github.com/EdgeSecurityTeam/EHole/releases/download/v3.1/EHole_windows_amd64.zip"),
 ]
 
 def fetch(url: str, out: Path) -> bool:

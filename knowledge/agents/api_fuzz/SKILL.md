@@ -70,7 +70,7 @@ Recon 产出:
   □ _endpoint_params.json   ← JS 提取的接口→参数需求映射表
   □ _secrets_found.json     ← JS 中发现的硬编码凭据
   □ _leaked_values.json     ← 初始值池（JS 硬编码值）
-  □ downloaded/{domain}/js/ ← 所有 JS 文件本地副本（需要时可回溯）
+  □ evidence/js/ ← 所有 JS 文件本地副本（需要时可回溯）
 ```
 
 ---

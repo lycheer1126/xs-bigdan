@@ -1,0 +1,6 @@
+# xs-bigdan 目标清单（复制为 targets.txt 后填写；本文件入库作模板）
+# 每行一个目标；格式: [id|]url[|备注]   ；# 开头为注释
+#
+# 例：
+# www-01|https://example.com|主站，重点测登录与API
+# api-01|https://api.example.com|开放API网关

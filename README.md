@@ -8,6 +8,7 @@
 
 - **Harness 做减法**：只负责读目标、写简报、分段执行、硬超时、digest 交接、汇总报告。
 - **模型决定怎么想，工具决定能看见什么**：pi agent 在同一段上下文里连续调用 curl/python 完成侦察→测试→验证。
+- **阶段由产物门控（Safe-First）**：🟢侦察→🟡联动/深挖→🔴高危→报告，进度=已通过的门（落盘产物）而非已消耗的时间；段只是上下文保鲜切片（源自 mastermind 的 Phase Gate/条件矩阵）。
 - **共享证据，不共享判决**：会话日志、evidence 证据文件全量保留；段间只传 RECON_DIGEST 交接，不压缩原始痕迹。
 - **不固化失败**：「枚举 miss ≠ 端点不存在」，「401 是门存在，不是此路失败」。
 
@@ -22,6 +23,7 @@ core/                核心模块包（升级主要改动区）
   report.py          汇总 findings + evidence → Markdown 报告（CONFIRMED/PENDING/INFO 三态分组）
 prompts/             system.md（纪律契约）+ methodology.md（13 节方法论速查 + 完整读取表）
 knowledge/           知识层（skills 18 / agents 7 / references 26 / scripts 7 参考），升级靠加文件
+webui/               Web 控制台（FastAPI）：任务管理/历史/配置，插件式模块，开发指南见 webui/README.md
 dev/                 开发辅助：smoke_lab / blackhole_lab 本地靶场 + watch_run_logs 实时观察
 docs/                USAGE.md 操作规范（README 在根）
 tools/               bin（xsreq/xsenum/probe + ffuf 等二进制）+ wordlists + downloads + 工具本体
@@ -38,12 +40,15 @@ npm i -g @earendil-works/pi-coding-agent@0.84.1
 
 # 2. 配置
 cp .env.example .env      # 填 BIGDAN_LLM_KEY（DeepSeek 直连 key）
-cp targets.txt.example targets.txt   # 填你收集的目标 URL
+# 编辑 targets.txt（文件内注释即模板）填你收集的目标 URL
 
 # 3. 运行
 python bigdan.py                     # 跑全部目标
 python bigdan.py --only www-01       # 只跑某个目标
 python bigdan.py --dry-run           # 先看计划
+
+# 4. Web 控制台（可选，推荐日常入口）
+python -X utf8 -m webui.server       # http://127.0.0.1:8865
 ```
 
 ## 输入约定
@@ -106,7 +111,7 @@ python bigdan.py --only <id>     # 保留 runtime/jobs/ 目录再跑，自动带
 - 发现漏洞 → Agent 写 `evidence/` 证据文件（完整请求 + 关键响应 + 影响）并打印 `FINDING: 类型|标题|文件名`。
 - 判定标准：完整请求 + 可复现响应差异 + 明确安全影响；宁可漏报不可误报。
 - 段间交接用 `### RECON_DIGEST` 结构化块：目标状态/技术栈/攻击面/已确认发现/疑似点/已试路径/下一步建议。
-- 敏感数据只用于证明漏洞，报告中打码。
+- 敏感数据只用于证明漏洞；本地授权测试（默认）证据/报告保留完整原始数据、不对外公开，无需脱敏。仅对外提交场景需在 BRIEF.md 声明后脱敏。
 
 ## 安全边界与免责声明
 

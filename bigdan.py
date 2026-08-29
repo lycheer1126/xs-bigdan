@@ -26,26 +26,65 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from core.agent_exec import run_pi_session
+from core.agent_exec import run_pi_session, extract_last_error
 from core.retry_detector import detect_surrender, build_retry_prompt
 
 VERSION = "0.1.0"
+
+
+def load_dotenv(path: Path) -> None:
+    """必须在模块常量求值前调用——否则 .env 里的 BIGDAN_* 对常量不可见(历史陷阱)。"""
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        k, _, v = line.partition("=")
+        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
+load_dotenv(Path(__file__).resolve() / ".env")
 
 JOBS_DIR = Path(os.environ.get("BIGDAN_JOBS_DIR", "runtime/jobs"))
 OUTPUTS_DIR = Path(os.environ.get("BIGDAN_OUTPUTS_DIR", "runtime/outputs"))
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 DEFAULT_SEGMENTS = int(os.environ.get("BIGDAN_SEGMENTS", "3"))
-DEFAULT_SEGMENT_TIMEOUT = int(os.environ.get("BIGDAN_SEGMENT_TIMEOUT_SEC", "900"))
+DEFAULT_SEGMENT_TIMEOUT = int(os.environ.get("BIGDAN_SEGMENT_TIMEOUT_SEC", "1800"))
 # 每目标总预算（墙钟），超时即停止该目标释放给下一个 —— 迁移自 pi-recon 的 PI_RECON_JOB_TIMEOUT_SEC
-DEFAULT_JOB_TIMEOUT = int(os.environ.get("BIGDAN_JOB_TIMEOUT_SEC", "1200"))
+# 真实 SRC 目标侦察+验证以小时计（qdedu 实测：20 分钟连侦察都跑不完），默认 1 小时
+DEFAULT_JOB_TIMEOUT = int(os.environ.get("BIGDAN_JOB_TIMEOUT_SEC", "3600"))
 DEFAULT_CONCURRENCY = int(os.environ.get("BIGDAN_CONCURRENCY", "1"))
+# 测试账号池（BRIEF 注入，推进认证后攻击面；模板见 credentials.example.txt）
+CREDENTIALS_FILE = os.environ.get("BIGDAN_CREDENTIALS", "credentials.txt")
 
 
 # ---------------------------------------------------------------- 基础工具
 
+def _site_label(url: str) -> str:
+    """从目标 URL 提取可识别的站点名（host，去协议/端口/路径/www.）。"""
+    u = (url or "").strip()
+    if "://" in u:
+        u = u.split("://", 1)[1]
+    u = u.split("/", 1)[0].split(":", 1)[0]
+    if u.startswith("www."):
+        u = u[4:]
+    return u or "unknown"
+
+
+def _safe_filename_part(s: str, max_len: int = 24) -> str:
+    """清洗为 Windows 文件名安全片段（非法字符转 -，截断）。"""
+    import re
+
+    s = re.sub(r'[\\/:*?"<>|\s]+', "-", s or "").strip("-")
+    return s[:max_len]
+
+
 def log(msg: str) -> None:
-    print(msg, flush=True)
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
     try:
         sys.stdout.flush()
     except Exception:  # noqa: BLE001
@@ -78,21 +117,6 @@ def resolve_llm_key() -> str:
         if v:
             return v
     return ""
-
-
-# ---------------------------------------------------------------- .env 加载
-
-def load_dotenv(path: Path) -> None:
-    if not path.is_file():
-        return
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].strip()
-        k, _, v = line.partition("=")
-        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
 # ---------------------------------------------------------------- 目标解析
@@ -142,39 +166,176 @@ def scope_hosts(targets: List[dict]) -> List[str]:
     return hosts
 
 
+# ---------------------------------------------------------------- 测试账号池
+
+def parse_credentials(text: str) -> List[dict]:
+    """每行: [scope|]user|pass[|备注]  ；# 开头为注释。
+
+    scope 缺省为 `*`（全部目标注入）；scope 匹配目标 id 或 host（精确，
+    或 host 以 .scope 结尾的子域）。登录速率红线（≤2次/秒）由 BRIEF 文案兜底。
+    """
+    creds: List[dict] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) >= 3:
+            scope, user, pwd = parts[0], parts[1], parts[2]
+            note = parts[3] if len(parts) > 3 else ""
+        elif len(parts) == 2:
+            scope, user, pwd, note = "*", parts[0], parts[1], ""
+        else:
+            continue
+        if not user or not pwd:
+            continue
+        creds.append({"scope": scope or "*", "user": user, "pass": pwd, "note": note})
+    return creds
+
+
+def credentials_for_target(target: dict, creds: List[dict]) -> List[dict]:
+    tid = (target.get("id") or "").lower()
+    host = re.sub(r"^https?://", "", target.get("url") or "").split("/")[0].split(":")[0].lower()
+    out: List[dict] = []
+    for c in creds:
+        s = (c.get("scope") or "*").lower()
+        if s in ("*", "") or s == tid or s == host or host.endswith("." + s):
+            out.append(c)
+    return out
+
+
 # ---------------------------------------------------------------- BRIEF
 
-# 段→读取索引（mastermind 融入:按需读取表。pi 每段全新上下文,文件读取是唯一知识通道,
-# BRIEF 注入当前段应读的 knowledge/ 文件,agent 自主 cat;methodology.md 另有完整目录表兜底）
-SEGMENT_READ_INDEX = {
-    0: [  # 段1: 侦察 + JS 分析
+# 阶段→读取索引（Safe-First 状态机：阶段由落盘产物门控，不由段号驱动。
+# pi 每段全新上下文，文件读取是唯一知识通道；methodology.md 第 13 节是完整兜底表，
+# methodology.md 开头「阶段与门控总览」是权威定义——与本表/harness 判定是同一份清单）
+PHASE_READ_INDEX = {
+    "recon": [  # 🟢 安全侦察: 指纹/WAF/JS 落盘/端点表
         ("agents/recon/SKILL.md", "侦察专家视角:本段产出标准(JS落盘/端点表)"),
         ("skills/js_analysis/SKILL.md", "JS 全量采集+深度分析(SPA chunk/Sub-Path SPA 探测)"),
+        ("references/browser-probe-usage.md", "无头浏览器用法:open/js/chunks/login + JS驱动打法(Vue/__vue__/mock登录)"),
         ("references/fingerprint-mapping.md", "指纹→测试映射表+WAF 签名(先探测 WAF 再动手)"),
         ("references/compliance-rules.md", "SRC 合规 TIER 分级,动手前必读"),
     ],
-    1: [  # 段2: 接口测试 + 值池联动
-        ("agents/api_fuzz/SKILL.md", "接口测试专家视角"),
+    "linkage": [  # 🟡 普通测试: 值池联动/无认证扫/泛查询/IDOR
+        ("agents/api_fuzz/SKILL.md", "接口测试专家视角:全接口覆盖+产出标准"),
         ("skills/data_linkage/SKILL.md", "值池联动:JS需求表×响应值池=测试矩阵"),
         ("references/response-chaining.md", "响应链方法论:A 返回值→B 输入"),
-        ("references/decision-trees.md", "参数特征命中→查漏洞决策树(§1-26)"),
-        ("skills/api_fuzz/SKILL.md", "API 全接口覆盖+盲测模板"),
+        ("references/decision-trees/README.md", "参数特征命中→先读索引再精读对应§决策树小文件(29棵,防上下文泛滥)"),
+        ("skills/xs_auth/SKILL.md", "BRIEF 注入了测试账号时:登录口逻辑审计手册(JS审计→定向验证→接管链)"),
     ],
-    2: [  # 段3+: 高危 + 利用 + 确认
+    "deep": [  # 🟡 条件阶段: JWT/加密/端点榨干（无 JWT 且无加密体→跳过并写 digest）
+        ("skills/jwt_attack/SKILL.md", "发现 JWT 时:全攻击链(alg:none/弱密钥/kid/RS256→HS256)"),
+        ("skills/crypto_attack/SKILL.md", "发现前端加密时:密钥提取→批量解密→明文回注值池"),
+        ("references/discovery-amplification.md", "Discovery Amplification:端点→同类路径/参数榨干"),
+    ],
+    "highrisk": [  # 🔴 条件阶段: 已有 ≥1 CONFIRMED 才进；WAF 存在全程 SAFE MODE
         ("agents/exploit/SKILL.md", "利用专家视角:FOUND≠CONFIRMED 三级分类"),
         ("references/high-risk-probing.md", "高危探测细节(SQLi/CMD/SSTI/SSRF/XXE/越权)"),
         ("references/impact-escalation.md", "影响升级框架:证明实际危害"),
+    ],
+    "report": [  # 收尾: 评级/报告视角
+        ("agents/report/SKILL.md", "报告视角:triage 6 项检查"),
         ("references/rating-standard.md", "SRC 评级标准(报告对齐)"),
+        ("references/impact-escalation.md", "影响升级框架:影响写'能做什么'"),
     ],
 }
 
 
-def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_idx: int = 0) -> None:
+# ---------------------------------------------------------------- 阶段状态机（Safe-First 门控）
+
+def _recon_gate(job_dir: Path) -> tuple[bool, str]:
+    """recon 门:契约文件存在 + completeness≥0.8 + 端点≥3（与 methodology 总览同一份清单）。"""
+    ep = job_dir / "evidence" / "_endpoint_params.json"
+    if not ep.is_file():
+        return False, "契约文件 _endpoint_params.json 不存在(JS 分析未产出)"
+    try:
+        data = json.loads(ep.read_text(encoding="utf-8", errors="replace"))
+        meta = data.get("_meta") or {}
+        n_ep = len(data.get("endpoints") or [])
+        comp = meta.get("analysis_completeness", 0)
+    except (OSError, json.JSONDecodeError):
+        return False, "契约文件存在但解析失败"
+    if not isinstance(comp, (int, float)) or comp < 0.8:
+        return False, f"契约 completeness={comp}(<0.8,JS 分析未达标)"
+    if n_ep < 3:
+        return False, f"契约端点数={n_ep}(<3)"
+    return True, f"契约完整:{n_ep} 端点/completeness={comp}"
+
+
+def _confirmed_count(job_dir: Path) -> int:
+    """runlog 里 CONFIRMED finding 事件数(FINDING 行由 harness 提取落盘)。"""
+    p = job_dir / "runlog.jsonl"
+    if not p.is_file():
+        return 0
+    n = 0
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("type") == "finding" and (rec.get("status") or "CONFIRMED") == "CONFIRMED":
+            n += 1
+    return n
+
+
+def _linkage_consumed(job_dir: Path) -> int:
+    """联动消费计数:hit 字段非 None 的结果行数。"""
+    p = job_dir / "evidence" / "_linkage_results.jsonl"
+    if not p.is_file():
+        return 0
+    n = 0
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            if json.loads(line).get("hit") is not None:
+                n += 1
+        except json.JSONDecodeError:
+            continue
+    return n
+
+
+def infer_phase(job_dir: Path) -> tuple[str, str]:
+    """阶段状态机:纯落盘产物推断（零 Agent 新增义务），返回 (阶段, 推断依据)。
+
+    判定次序: report > highrisk > deep/linkage/recon（由门放行）。
+    与 methodology.md「阶段与门控总览」是同一份清单的产物化实现；
+    BRIEF 会写明阶段+依据，Agent 有据可推翻。
+    """
+    # report: agent 明确建议结束（存在人工新线索时不短路——线索重新开面）
+    digests = sorted(job_dir.glob("digest-*.md"))
+    fresh_clue = (job_dir / "user_input.md").is_file()
+    if digests and not fresh_clue:
+        try:
+            if "建议结束" in digests[-1].read_text(encoding="utf-8", errors="replace"):
+                return "report", "最新 digest 标注建议结束"
+        except OSError:
+            pass
+    # highrisk: ≥1 CONFIRMED 且 recon 门已过（门没过→回 recon 补，写明原因）
+    confirmed = _confirmed_count(job_dir)
+    if confirmed >= 1:
+        gate_ok, gate_why = _recon_gate(job_dir)
+        if gate_ok:
+            return "highrisk", f"已有 {confirmed} 条 CONFIRMED，{gate_why}"
+        return "recon", f"已有发现但 {gate_why}，先补门"
+    # deep / linkage / recon: 由 recon 门与联动消费进度放行
+    gate_ok, gate_why = _recon_gate(job_dir)
+    if not gate_ok:
+        return "recon", gate_why
+    consumed = _linkage_consumed(job_dir)
+    if consumed > 0:
+        return "deep", f"联动已消费 {consumed} 条配对且暂无 CONFIRMED，转入 JWT/加密/端点榨干"
+    return "linkage", f"{gate_why}，值池联动尚未消费"
+
+
+def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_idx: int = 0,
+                creds: Optional[List[dict]] = None) -> tuple[str, str]:
+    """写目标简报。返回 (阶段, 推断依据) 供调度器日志展示。"""
     brief = job_dir / "BRIEF.md"
     tools_dir = Path(__file__).resolve().parent / "tools"
     knowledge_dir = Path(__file__).resolve().parent / "knowledge"
     req = (tools_dir / "bin" / "xsreq.py").as_posix()
     enum = (tools_dir / "bin" / "xsenum.py").as_posix()
+    browser = (tools_dir / "bin" / "browser_probe.py").as_posix()
     wordlist_paths = (tools_dir / "wordlists" / "paths.txt").as_posix()
     wordlist_params = (tools_dir / "wordlists" / "params.txt").as_posix()
 
@@ -183,20 +344,23 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
     probe = tools_dir / "bin" / "probe_tools.py"
     if probe.is_file():
         try:
+            probe_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
             r = subprocess.run(
                 [sys.executable, str(probe)],
                 capture_output=True,
                 timeout=30,
                 encoding="utf-8",
                 errors="replace",
+                env=probe_env,
             )
             if r.returncode == 0 and r.stdout.strip():
                 probe_extra = "\n" + r.stdout.strip() + "\n"
         except Exception:  # noqa: BLE001
             probe_extra = ""
 
-    # 读取索引（按段注入 3-5 条;完整目录表在 prompts/methodology.md 第 13 节）
-    read_idx = SEGMENT_READ_INDEX.get(min(seg_idx, max(SEGMENT_READ_INDEX)), SEGMENT_READ_INDEX[0])
+    # 读取索引（按阶段注入;完整目录表在 prompts/methodology.md 第 13 节）
+    phase, basis = infer_phase(job_dir)
+    read_idx = PHASE_READ_INDEX.get(phase, PHASE_READ_INDEX["recon"])
     idx_lines = "\n".join(
         f"- `{knowledge_dir.as_posix()}/{path}` — {why}"
         for path, why in read_idx
@@ -205,23 +369,58 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
     # 联动配对（值池引擎注入:契约文件存在时才显示）
     linkage_section = build_linkage_section(job_dir)
 
+    # 用户线索（人工协作通道:webui 提供线索 → user_input.md → 续跑时注入 BRIEF）
+    user_input_section = ""
+    ui = job_dir / "user_input.md"
+    if ui.is_file():
+        ui_text = ui.read_text(encoding="utf-8", errors="replace").strip()
+        if ui_text:
+            user_input_section = (
+                f"\n## 用户线索（人工提供，优先处理）\n{ui_text}\n"
+            )
+
+    # 测试账号（人工提供的账号池:推进认证后攻击面——越权/IDOR 在认证后才是主战场）
+    cred_section = ""
+    matched_creds = credentials_for_target(target, creds) if creds else []
+    if matched_creds:
+        cred_lines = [
+            f"- 用户名: `{c['user']}`  密码: `{c['pass']}`" + (f"（{c['note']}）" if c["note"] else "")
+            for c in matched_creds
+        ]
+        cred_section = (
+            "\n## 测试账号（人工提供，先登录再测认证后攻击面）\n"
+            "登录速率≤2次/秒，禁止爆破，命中即停；登录成功后优先测越权/IDOR/垂直越权与业务逻辑，"
+            "两账号差分是金标准。登录失败 2 次即停，写 BLOCKED:AUTH_CREDENTIALS。\n"
+            + "\n".join(cred_lines) + "\n"
+        )
+
     brief.write_text(
         f"# 目标简报\n\n"
         f"- 目标 ID: `{target['id']}`\n"
         f"- 目标 URL: `{target['url']}`\n"
         f"- 备注: {target['note'] or '无'}\n"
         f"- 本次授权范围（白名单）: {', '.join(scope)}\n"
-        f"- 总段数: {segs} | 本段: 第 {seg_idx + 1} 段\n\n"
+        f"- 总段数: {segs} | 本段: 第 {seg_idx + 1} 段（段=上下文保鲜切片，与阶段无关）\n"
+        f"- 本段阶段判定: **{phase}**（harness 按落盘产物推断: {basis}；"
+        f"你若依据 BRIEF/证据判断阶段不同，按你的判断推进并在 digest 里说明）\n\n"
         f"## 读取索引（本段建议读,按需 cat;别一次全读,防上下文泛滥）\n"
         f"{idx_lines}\n"
         f"\n"
         f"{linkage_section}"
+        f"{user_input_section}"
+        f"{cred_section}"
         f"\n"
         f"## 工具（绝对路径，直接 `python <路径> ...` 调用，不要 which/find 找）\n"
         f"- 请求: `python {req} <url> [--method POST] [--data '...'] [--json '{{...}}'] [--header 'K: V'] [--save 文件名]`\n"
         f"- 枚举: `python {enum} <base-url> [--wordlist 文件] [--limit N]`\n"
-        f"- 路径字典: `{wordlist_paths}`\n"
+        f"- 浏览器分析(SPA必用): `python {browser} open|js|chunks|login|snow <url> ...` —— 渲染后DOM/console/XHR/执行JS/mock登录/雪瞳26类提取;高难站先走JS驱动(见读取索引)\n"
+        f"- 路径字典: `{wordlist_paths}`(轻探档103条,xsenum默认)\n"
         f"- 参数字典: `{wordlist_params}`\n"
+        f"- 深度字典(按级选用,勿跳级;WAF/SAFE MODE 时禁止深扫档): "
+        f"`{(tools_dir / 'wordlists' / 'seclists' / 'web' / 'quickhits.txt').as_posix()}`(标准) → "
+        f"`{(tools_dir / 'wordlists' / 'seclists' / 'web' / 'common.txt').as_posix()}`(全量) → "
+        f"`{(tools_dir / 'wordlists' / 'seclists' / 'web' / 'raft-small-dirs.txt').as_posix()}`(深扫) → "
+        f"`{(tools_dir / 'wordlists' / 'seclists' / 'web' / 'api-endpoints.txt').as_posix()}`(API专项)\n"
         f"{probe_extra}"
         f"\n"
         f"## 规则\n"
@@ -229,6 +428,7 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
         f"- 发现漏洞 → 按 system prompt 的『证据落盘协议』写 evidence/ 并打印 FINDING 行。\n",
         encoding="utf-8",
     )
+    return phase, basis
 
 
 # ---------------------------------------------------------------- worklog 事件日志
@@ -281,6 +481,16 @@ def build_linkage_section(job_dir: Path, max_pairs: int = 10) -> str:
     vp = job_dir / "evidence" / "_leaked_values.json"
     if not ep.is_file() or not vp.is_file():
         return ""
+    try:  # Agent 手写契约损坏时跳过联动,绝不炸整轮运行
+        return _build_linkage_section_inner(job_dir, max_pairs)
+    except Exception as e:  # noqa: BLE001
+        log(f"[linkage] 引擎加载失败已跳过: {type(e).__name__}: {e}")
+        return ""
+
+
+def _build_linkage_section_inner(job_dir: Path, max_pairs: int = 10) -> str:
+    from core.linkage import load_linkage_state, PairingEngine, check_pair_completeness
+
     reg, pool = load_linkage_state(job_dir)
     res_path = job_dir / "evidence" / "_linkage_results.jsonl"
     if res_path.is_file():
@@ -312,6 +522,7 @@ def build_linkage_section(job_dir: Path, max_pairs: int = 10) -> str:
 # ---------------------------------------------------------------- digest 提取
 
 DIGEST_RE = re.compile(r"#{1,4}\s*RECON_DIGEST\s*\n(.*)$", re.S | re.I)
+BLOCKED_RE = re.compile(r"#{1,4}\s*BLOCKED\s*(?:\n|:)|BLOCKED\s*type\s*:", re.I)
 
 
 def extract_digest(log_text: str) -> Optional[str]:
@@ -438,6 +649,18 @@ def build_user_prompt(target: dict, seg_idx: int, segs: int, timeout_sec: int) -
 
 # ---------------------------------------------------------------- 单目标运行
 
+def _load_prev_findings(job_dir: Path) -> List[dict]:
+    """续打保护:读上一轮 summary.json 的 findings（报告只读 summary.json，不合并会丢历史发现）。"""
+    p = job_dir / "summary.json"
+    if not p.is_file():
+        return []
+    try:
+        prev = json.loads(p.read_text(encoding="utf-8"))
+        return [f for f in (prev.get("findings") or []) if isinstance(f, dict)]
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
 def run_target(
     target: dict,
     scope: List[str],
@@ -446,19 +669,21 @@ def run_target(
     seg_timeout_sec: int,
     model: str,
     dry_run: bool = False,
+    creds: Optional[List[dict]] = None,
 ) -> dict:
     job_dir = JOBS_DIR / target["id"]
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "evidence").mkdir(parents=True, exist_ok=True)
-    write_brief(job_dir, target, scope, segs, 0)
+    write_brief(job_dir, target, scope, segs, 0, creds=creds)
 
     summary = {
         "id": target["id"],
         "url": target["url"],
         "note": target["note"],
         "segments": [],
-        "findings": [],
+        "findings": _load_prev_findings(job_dir),
         "early_stop": False,
+        "blocked": False,
         "timed_out": False,
         "job_timeout_sec": job_timeout_sec,
         "seg_timeout_sec": seg_timeout_sec,
@@ -472,8 +697,8 @@ def run_target(
     segs_ran = 0
     for i in range(segs):
         seg_no = i + 1
-        # 每段重写 BRIEF:读取索引随段更新(mastermind 按需读取表机制)
-        write_brief(job_dir, target, scope, segs, i)
+        # 每段重写 BRIEF:阶段由产物状态机推断（Safe-First 门控），段只是保鲜切片
+        phase, basis = write_brief(job_dir, target, scope, segs, i, creds=creds)
         # 目标级总预算：预留 ~25s 收尾（迁移自 pi-recon 的 budget = timeout - 25）
         left = job_timeout_sec - (time.monotonic() - t0)
         if left < 45:
@@ -487,9 +712,9 @@ def run_target(
         log_path = job_dir / f"session-{seg_no}.log"
         tag = target["id"]
 
-        runlog(job_dir, "segment_start", {"seg": seg_no, "budget_sec": seg_to})
+        runlog(job_dir, "segment_start", {"seg": seg_no, "budget_sec": seg_to, "phase": phase})
         log(f"=== [{tag}] 段 {seg_no}/{segs} 开始 {datetime.now().strftime('%H:%M:%S')} "
-            f"(seg_budget={seg_to}s, job_left={left:.0f}s) ===")
+            f"phase={phase}（seg_budget={seg_to}s, job_left={left:.0f}s） ===")
         exit_code = run_pi_session(
             job_dir,
             system_prompt=system_prompt,
@@ -506,10 +731,12 @@ def run_target(
         segs_ran += 1
         log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
 
-        # 提取本段发现
+        # 提取本段发现（按 类型|标题|证据 去重后合并，保留上一轮/前几段的历史发现）
         seg_findings = extract_findings(log_text)
-        summary["findings"].extend(seg_findings)
         for f in seg_findings:
+            key = (f["type"], f["title"], f["file"])
+            if all((x["type"], x["title"], x["file"]) != key for x in summary["findings"]):
+                summary["findings"].append(f)
             runlog(job_dir, "finding", {"seg": seg_no, "vuln_type": f["type"], "title": f["title"], "file": f["file"], "status": f.get("status", "CONFIRMED")})
 
         # 提取 digest
@@ -519,9 +746,13 @@ def run_target(
             if "建议结束" in digest:
                 summary["early_stop"] = True
                 runlog(job_dir, "early_stop", {"seg": seg_no})
+        # 人工求助检测（BLOCKED 协议）：agent 请求人工输入 → 停止后续段等待线索
+        if BLOCKED_RE.search(digest or log_text[-4000:]):
+            summary["blocked"] = True
+            runlog(job_dir, "blocked", {"seg": seg_no})
 
         # 投降检测(mastermind retry_detector):agent 过早收手 → 下一段强制重试
-        if not summary["early_stop"]:
+        if not summary["early_stop"] and not summary["blocked"]:
             detect_text = digest or log_text[-2500:]
             surr = detect_surrender(detect_text)
             if surr["should_retry"]:
@@ -540,12 +771,21 @@ def run_target(
             "digest_saved": bool(digest),
             "log": log_path.name,
         }
+        # exit=1 等异常退出：提取日志尾部失败原因归档（旧版只记 exit 码，失败根因无从排查）
+        if exit_code not in (0, 124, 127):
+            seg_rec["last_error"] = extract_last_error(log_path)
+            runlog(job_dir, "note", {"seg": seg_no, "msg": f"exit={exit_code} 失败原因: {seg_rec['last_error']}"})
+            log(f"=== [{tag}] 段 {seg_no} 失败原因: {seg_rec['last_error']} ===")
         summary["segments"].append(seg_rec)
         runlog(job_dir, "segment_end", {"seg": seg_no, "exit_code": exit_code, "findings": len(seg_findings), "digest_saved": bool(digest)})
         log(f"=== [{tag}] 段 {seg_no} 结束 exit={exit_code} findings={len(seg_findings)} digest={'Y' if digest else 'N'} ===")
 
         if exit_code == 124:
             summary["timed_out"] = True
+
+        if summary["blocked"]:
+            log(f"=== [{tag}] Agent 请求人工输入（BLOCKED），停止后续段；提供线索后点「续跑」===")
+            break
 
         if summary["early_stop"]:
             log(f"=== [{tag}] Agent 建议结束，提前停止后续段 ===")
@@ -566,15 +806,14 @@ def main() -> int:
     ap.add_argument("--targets", default="targets.txt", help="目标清单文件（默认 targets.txt）")
     ap.add_argument("--target", help="直接给单个 URL（优先级高于 --targets）")
     ap.add_argument("--only", help="只运行指定 id（逗号/空格分隔多值）")
-    ap.add_argument("--segments", type=int, default=DEFAULT_SEGMENTS, help=f"每目标段数（默认 {DEFAULT_SEGMENTS}）")
+    ap.add_argument("--segments", type=int, default=DEFAULT_SEGMENTS, help=f"每目标最多段数（上下文保鲜切片，默认 {DEFAULT_SEGMENTS}；与阶段无关）")
     ap.add_argument("--segment-timeout", type=int, default=DEFAULT_SEGMENT_TIMEOUT, help=f"每段预算上限秒（默认 {DEFAULT_SEGMENT_TIMEOUT}，受目标总预算约束）")
-    ap.add_argument("--job-timeout", type=int, default=DEFAULT_JOB_TIMEOUT, help=f"每目标总预算秒，超时停止该目标（默认 {DEFAULT_JOB_TIMEOUT}=20分钟）")
+    ap.add_argument("--job-timeout", type=int, default=DEFAULT_JOB_TIMEOUT, help=f"每目标总预算秒，超时停止该目标（默认 {DEFAULT_JOB_TIMEOUT}=60分钟）")
     ap.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY, help=f"同时测试的目标数 fill-slot（默认 {DEFAULT_CONCURRENCY}=串行）")
+    ap.add_argument("--credentials", default=CREDENTIALS_FILE, help=f"测试账号池文件（默认 {CREDENTIALS_FILE}，不存在则跳过）")
     ap.add_argument("--model", default=os.environ.get("BIGDAN_LLM_MODEL", "deepseek-v4-flash"), help="LLM 模型")
     ap.add_argument("--dry-run", action="store_true", help="只打印执行计划")
     args = ap.parse_args()
-
-    load_dotenv(Path(__file__).resolve().parent / ".env")
 
     if args.target:
         targets = parse_targets(args.target)
@@ -593,6 +832,13 @@ def main() -> int:
     job_timeout = max(90, int(args.job_timeout))
     seg_timeout = max(60, int(args.segment_timeout))
     workers = max(1, int(args.concurrency))
+
+    creds: List[dict] = []
+    cred_path = Path(args.credentials)
+    if cred_path.is_file():
+        creds = parse_credentials(cred_path.read_text(encoding="utf-8", errors="ignore"))
+    if creds:
+        log(f"测试账号: {len(creds)} 条（{cred_path}），将注入命中目标的 BRIEF")
 
     log(f"xs-bigdan v{VERSION} | 目标数={len(targets)} | 白名单={scope}")
     log(f"模型={args.model} provider={os.environ.get('BIGDAN_LLM_PROVIDER', 'deepseek')} "
@@ -616,7 +862,8 @@ def main() -> int:
         # 串行：一个目标跑完（或超时）再下一个 —— 每目标总预算保证不拖死队列
         for t in targets:
             all_summaries.append(
-                run_target(t, scope, args.segments, job_timeout, seg_timeout, args.model)
+                run_target(t, scope, args.segments, job_timeout, seg_timeout, args.model,
+                           creds=creds)
             )
     else:
         # fill-slot 并发：最多 workers 个目标同时在测，一个完成/超时立即补下一个
@@ -629,7 +876,8 @@ def main() -> int:
                 while len(futures) < workers and q:
                     t = q.pop(0)
                     log(f"=== [slot] 启动目标 {t['id']} in_flight={len(futures)+1}/{workers} queued={len(q)} ===")
-                    fut = ex.submit(run_target, t, scope, args.segments, job_timeout, seg_timeout, args.model)
+                    fut = ex.submit(run_target, t, scope, args.segments, job_timeout, seg_timeout,
+                                    args.model, False, creds)
                     futures[fut] = t["id"]
                 if not futures:
                     break
@@ -654,9 +902,25 @@ def main() -> int:
             f"segments={s.get('segments_ran', 0)}/{s.get('segments_planned', '?')} "
             f"elapsed={s.get('elapsed_sec', '?')}s timed_out={s.get('timed_out', False)}")
 
-    # 汇总报告
+    # 汇总报告（文件名带站点/备注，方便历史归档里定位目标；时间戳防同站点多轮覆盖）
     from core.report import build_report
-    report_path = OUTPUTS_DIR / f"report-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+    sites, notes = [], []
+    for s in all_summaries:
+        h = _site_label(s.get("url", ""))
+        if h not in sites:
+            sites.append(h)
+        n = (s.get("note") or "").strip()
+        if n and n not in notes:
+            notes.append(n)
+    if len(sites) == 1:
+        site_part = sites[0]
+        note_part = _safe_filename_part("-".join(notes)) if notes else ""
+    else:
+        site_part = f"multi-{len(sites)}"
+        note_part = ""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    name = f"report-{site_part}" + (f"-{note_part}" if note_part else "") + f"-{stamp}"
+    report_path = OUTPUTS_DIR / f"{name}.md"
     build_report(all_summaries, report_path, JOBS_DIR)
     log(f"[+] 报告已生成: {report_path}")
     return 0

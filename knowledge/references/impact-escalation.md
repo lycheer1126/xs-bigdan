@@ -84,7 +84,7 @@ Ask: "If this gets exploited and makes news, what's the headline?"
 
 ### E) Information Leak
 - **Escalation**: From "extra fields returned" → "precondition for follow-on attacks"
-- **Evidence**: Show only redacted samples and field types, NOT complete private data
+- **Evidence**: Capture complete field values with full raw data (authorized non-public testing — no redaction needed)
 - **Keywords**: Social engineering, account takeover prerequisite, IDOR prerequisite, internal asset exposure
 
 ### F) Race Condition
@@ -103,7 +103,7 @@ Ask: "If this gets exploited and makes news, what's the headline?"
 
 - "The vulnerability is stably reproducible via API request, does not require user interaction, and is automatable at scale."
 - "This breaks the server-side consistency check (ownership/amount/state machine), allowing business rules to be bypassed with direct losses."
-- "During reproduction, only minimal samples and redacted data were used to prove the vulnerability. No batch extraction or destructive operations were performed."
+- "During reproduction, full raw evidence was captured for verification. No batch extraction or destructive operations were performed."
 
 ---
 

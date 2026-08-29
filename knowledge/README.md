@@ -8,8 +8,8 @@ xs-bigdan 的方法论知识库,全量融入自 mastermind-bug-bounty 2.0.0(知�
 |------|------|-----------|----------------|
 | `skills/` | 18 个操作技能(js_analysis / data_linkage / jwt_attack / api_fuzz / race_condition ...) | 某类操作**怎么做**(步骤/命令/判定) | 攻克了新攻击手法、沉淀了新操作流程 |
 | `agents/` | 7 个阶段视角(recon / api_fuzz / crypto_attack / bypass / exploit / report / ai_security) | 某个阶段**该决策什么**(产出标准/执行顺序/角色定义) | 新增测试阶段、调整阶段产出契约 |
-| `references/` | 26 个参考文档(decision-trees / fingerprint-mapping / compliance-rules / cve-chains ...) | 遇到特征时**查什么**(决策树/指纹表/合规速查) | 新增攻击面类型、补充查证资料 |
-| `scripts/` | 7 个 harness 钩子(worklog / retry_detector / triage_gate / handoff / context / guard / snow_eyes) | **治理逻辑**如何落地 | 新增治理机制;注意:思想进 `bigdan/`,原脚本留此作参考 |
+| `references/` | 决策树目录 decision-trees/(29棵,按需精读) + 25 个参考文档(fingerprint-mapping / compliance-rules / cve-chains ...) | 遇到特征时**查什么**(决策树/指纹表/合规速查) | 新增攻击面类型、补充查证资料 |
+| ~~scripts/~~ | 已删除(2026-08-29):mastermind 钩子存档,思想均已移植——retry_detector→`core/`,worklog→runlog,session_context→compose_context,handoff→RECON_DIGEST,triage→report 证据检查,snow_eyes→browser_probe | 原件见 git 历史 | — |
 
 ## 读取机制(为什么这样设计)
 

@@ -29,14 +29,21 @@ LOCAL_BIN = Path(__file__).resolve().parent
 TOOLS = [
     ("ffuf", "目录/参数模糊测试(快速大字典)", "xsenum.py 的高性能替代,有大字典场景用"),
     ("feroxbuster", "递归目录枚举", "深层目录发现"),
+    ("ehole", "指纹识别(EHole 棱洞)", "finger -u <url> 被动指纹辅助;仅指纹模式,禁用其漏洞扫描模块(TIER 合规)"),
+    ("slider_captcha_solver", "滑块验证码程序化解题(xs_auth S9)", "复刻前端加密生成 captchaVerification;依赖 pycryptodome/numpy/pillow"),
+    ("dirsearch", "目录扫描(常见路径字典)", "目录枚举补充/字典基线"),
+    ("browser_probe", "无头浏览器分析(SPA DOM/console/XHR/JS执行/mock登录)", "前端JS驱动优先: Vue chunk枚举/__vue__.$parent/前端签名加密/mock登录"),
     ("nuclei", "漏洞模板扫描", "已知 CVE 批量验证"),
     ("gobuster", "目录/DNS 枚举", "目录与子域枚举"),
+    ("cloudfox", "云资产枚举(AWS)", "云环境权限与资产发现(需授权)"),
+    ("jwt_tool", "JWT 攻击测试", "JWT 签名爆破/算法混淆/kid注入"),
     ("arjun", "HTTP 参数发现", "隐藏参数枚举"),
     ("subfinder", "子域收集", "资产扩展(需授权范围允许)"),
     ("nmap", "端口/服务扫描", "目标端口与指纹"),
     ("ncat", "端口监听/回连", "反弹/回连验证"),
     ("socat", "端口转发/监听", "流量转发与监听"),
     ("sqlmap", "SQL 注入自动化", "注入点验证(需授权)"),
+    ("ysoserial", "Java 反序列化 payload 生成", "Java 链生成(仅授权靶场)"),
     ("httpx", "HTTP 探测(批量URL存活+指纹)", "批量存活与指纹"),
     ("jadx", "APK 反编译", "移动端 APK 逆向"),
     ("cast", "链上合约交互", "智能合约读取/调用"),
@@ -52,12 +59,16 @@ PY_LIBS = [
     ("ldap3", "LDAP 协议交互"),
     ("pyasn1", "ASN.1 编解码"),
     ("pyasn1_modules", "ASN.1 标准模块"),
+    ("playwright", "无头浏览器(配合 browser_probe.py 使用)"),
+    ("boto3", "AWS SDK(云资源枚举)"),
+    ("impacket", "SMB/LDAP/WinRM 协议(域渗透,需授权)"),
+    ("mitmproxy", "HTTPS 中间人抓包(mitmdump 命令行)"),
 ]
 
 
 def _local_entry(cmd: str) -> Path | None:
-    """本地入口: 先 tools/bin/ 的 {cmd}.exe / .bat / 无扩展, 再 tools/foundry/ 的 {cmd}.exe。"""
-    for suffix in (".exe", ".bat", ""):
+    """本地入口: 先 tools/bin/ 的 {cmd}.exe / .bat / .py / 无扩展, 再 tools/foundry/ 的 {cmd}.exe。"""
+    for suffix in (".exe", ".bat", ".py", ""):
         p = LOCAL_BIN / f"{cmd}{suffix}"
         if p.is_file():
             return p
@@ -91,6 +102,10 @@ def _py_lib_ok(lib: str) -> bool:
 
 
 def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        pass
     available: list[tuple[str, str, str, str]] = []  # (name, desc, scene, where)
     for name, desc, scene in TOOLS:
         ok, where = _has(name)

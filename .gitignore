@@ -15,7 +15,16 @@ tools/bin/*.bat
 tools/foundry/
 tools/jadx/
 tools/sqlmap/
+tools/jwt_tool/
+tools/nikto/
 tools/downloads/*.zip
 
 # 会话记录
 .pi-sessions/
+llm-profiles.json
+
+# 测试账号池（真实凭据，严禁入库）
+credentials.txt
+
+# 目标清单含真实在测目标,公开仓库不泄漏(模板: targets.example.txt)
+targets.txt

@@ -24,6 +24,11 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def local_now() -> str:
+    """本地墙钟时间，用于日志行标注（UTC 头 + 本地时间双标，用户可区分中断重启批次）。"""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _prefix_tag(tag: str, line: str) -> str:
     """Prefix challenge id on every console/file line so parallel jobs are separable."""
     t = (tag or "").strip()
@@ -45,8 +50,9 @@ def _write(
     tag: str = "",
 ) -> None:
     line = _prefix_tag(tag, line)
-    if not line.endswith("\n"):
-        line = line + "\n"
+    # 每行统一加本地时间戳（[HH:MM:SS]），区分中断重启批次；多行内容逐行加
+    ts = f"[{local_now()[11:]}] "
+    line = "\n".join(ts + ln if ln else "" for ln in line.rstrip("\n").split("\n")) + "\n"
     with lock:
         logf.write(line)
         logf.flush()
@@ -267,6 +273,77 @@ def _models_base_hint() -> str:
     return os.environ.get("DEEPSEEK_BASE_URL") or os.environ.get("LLM_BASE_URL") or "<unknown>"
 
 
+# Token Rhythm 等上游限流: pi 收到 429(UPSTREAM_RATE_LIMITED)/503(SERVICE_BUSY) 会直接退出(exit=1)，
+# 且 provider 配置层无重试字段。这里在段内做进程级重试：等待后重启 pi 会话（受段预算约束）。
+LLM_RATE_LIMIT_RETRIES = 2        # 最多重试次数
+LLM_RATE_LIMIT_WAIT_SEC = 60      # 每次等待秒数（对齐上游 retryAfterSeconds=60）
+_LLM_LIMITED_MARKS = (
+    "429 status code",
+    "UPSTREAM_RATE_LIMITED",
+    "SERVICE_BUSY",
+    "503 status code",
+    # 网关类 5xx：上游抖动，等待后重试通常能恢复
+    "500 status code",
+    "502 status code",
+    "504 status code",
+    "ECONNRESET",
+    "fetch failed",
+)
+# 致命错误：重试不可能成功（余额/鉴权/请求参数），立即失败并把原因归档
+_LLM_FATAL_MARKS = (
+    "402 status code",
+    "Insufficient Balance",
+    "invalid api key",
+    "Invalid API key",
+    "invalid_request_error",
+)
+
+
+def _looks_like_llm_limited(tail: str) -> bool:
+    """从 pi 会话日志尾部判断是否因 LLM 上游限流/抖动失败（区别于目标侧 429）。"""
+    return any(m in tail for m in _LLM_LIMITED_MARKS)
+
+
+def _looks_like_llm_fatal(tail: str) -> bool:
+    """致命错误（余额不足/鉴权失败/参数错）——重试只是空耗预算。"""
+    return any(m in tail for m in _LLM_FATAL_MARKS)
+
+
+# 日志尾部失败行提取：命中错误特征、跳过 harness 自身行（供 summary/report 归档 exit=1 根因）
+_LLM_ERR_LINE_RE = re.compile(
+    r"(?i)(status code|api error|error:|exception|insufficient|invalid api|rate.?limit|failed)")
+_LLM_ERR_SKIP_RE = re.compile(
+    r"(?i)(heartbeat|session_dir files|--- (begin|end|live|agent)|spawning pi|"
+    r"mirror error|tee error|user_prompt_preview|retry)")
+
+
+def extract_last_error(log_path: Path, clip: int = 220) -> str:
+    """取会话日志尾部最后一行失败原因（pi 把上游错误打到 stdout，会话 jsonl 里没有）。"""
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    for line in reversed(text.splitlines()[-400:]):
+        s = line.strip()
+        if not s or _LLM_ERR_SKIP_RE.search(s):
+            continue
+        if _LLM_ERR_LINE_RE.search(s):
+            return _clip(s, clip)
+    return ""
+
+
+def _append_log_note(log_path: Path, msg: str, console: bool = True, tag: str = "") -> None:
+    """重试/放弃等 harness 决策追加到会话日志（与 tee 行同格式前缀，肉眼可追）。"""
+    line = f"# --- {msg} ---"
+    if console:
+        print(f"[{tag or 'agent_exec'}] {line}", flush=True)
+    try:
+        with log_path.open("a", encoding="utf-8", errors="replace") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
 def run_pi_session(
     work_dir: Path,
     *,
@@ -283,6 +360,82 @@ def run_pi_session(
     tee_console: bool = True,
     extra_args: Optional[List[str]] = None,
     job_tag: str = "",
+) -> int:
+    """包一层 429/5xx 重试：LLM 上游限流时等待后重启 pi 会话。
+
+    预算约束（deadline 感知）：重试等待与重跑全部计入 timeout_sec 总预算，
+    段耗时不会像旧版那样放大到 (retries+1)*timeout 打穿目标总预算。
+    致命错误（402 余额/鉴权/参数错）不重试；失败原因留在日志尾部，
+    由 extract_last_error 提取进 summary/report。
+    """
+    t0 = time.monotonic()
+    last_ec = 1
+    for attempt in range(LLM_RATE_LIMIT_RETRIES + 1):
+        remaining = int(timeout_sec - (time.monotonic() - t0))
+        if attempt > 0 and remaining < 45:
+            _append_log_note(log_path, f"段剩余预算不足45s，停止 LLM 重试 (已试 {attempt} 次)", tag=job_tag)
+            break
+        ec = _run_pi_session_once(
+            work_dir,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            log_path=log_path,
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            thinking=thinking,
+            pi_bin=pi_bin,
+            timeout_sec=timeout_sec if attempt == 0 else max(45, remaining),
+            session_name=session_name,
+            tee_console=tee_console,
+            extra_args=extra_args,
+            job_tag=job_tag,
+            log_mode=("w" if attempt == 0 else "a"),
+        )
+        last_ec = ec
+        if ec == 0 or ec == 124 or ec == 127:
+            return ec
+        try:
+            tail = log_path.read_text(encoding="utf-8", errors="replace")[-1600:]
+        except OSError:
+            tail = ""
+        if _looks_like_llm_fatal(tail):
+            _append_log_note(log_path, "LLM 致命错误(余额/鉴权/参数)，重试无意义，直接失败", tag=job_tag)
+            return ec
+        if not _looks_like_llm_limited(tail) or attempt >= LLM_RATE_LIMIT_RETRIES:
+            return ec
+        # 等待也受段预算约束：等待后至少还剩 45s 可跑一个最小重试段
+        budget_left = int(timeout_sec - (time.monotonic() - t0))
+        wait = min(LLM_RATE_LIMIT_WAIT_SEC, budget_left - 45)
+        if wait < 1:
+            _append_log_note(log_path, "段剩余预算不足以完成重试，放弃", tag=job_tag)
+            return ec
+        tag = job_tag or work_dir.name or ""
+        _append_log_note(
+            log_path,
+            f"LLM 上游限流(429/5xx)，等待 {wait}s 后重试 (attempt {attempt + 1}/{LLM_RATE_LIMIT_RETRIES})",
+            tag=tag)
+        time.sleep(wait)
+    return last_ec
+
+
+def _run_pi_session_once(
+    work_dir: Path,
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    log_path: Path,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    thinking: Optional[str] = None,
+    pi_bin: str = "pi",
+    timeout_sec: int = 900,
+    session_name: str = "session",
+    tee_console: bool = True,
+    extra_args: Optional[List[str]] = None,
+    job_tag: str = "",
+    log_mode: str = "w",
 ) -> int:
     work_dir.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -370,10 +523,10 @@ def run_pi_session(
     timed_out = False
     base_hint = _models_base_hint()
 
-    with log_path.open("w", encoding="utf-8", errors="replace") as logf:
+    with log_path.open(log_mode, encoding="utf-8", errors="replace") as logf:
         header = (
             f"# pi-recon agent transcript job={tag}\n"
-            f"# started_at={utc_now()}\n"
+            f"# started_at={utc_now()} (本地 {local_now()})\n"
             f"# cwd={work_dir}\n"
             f"# timeout_sec={timeout_sec}\n"
             f"# llm_base_hint={base_hint}\n"
@@ -385,7 +538,7 @@ def run_pi_session(
         _write(lock, logf, header.rstrip("\n"), tee_console, tag=tag)
         _write(lock, logf, f"# user_prompt_preview=\n{user_prompt[:1500]}", tee_console, tag=tag)
         _write(lock, logf, "# --- agent output ---", tee_console, tag=tag)
-        _write(lock, logf, f"# spawning pi at {utc_now()} ...", tee_console, tag=tag)
+        _write(lock, logf, f"# spawning pi at {utc_now()} (本地 {local_now()}) ...", tee_console, tag=tag)
 
         stop = threading.Event()
         mirror = threading.Thread(
@@ -439,6 +592,16 @@ def run_pi_session(
                     tee_console,
                     tag=tag,
                 )
+            except BaseException:
+                # KeyboardInterrupt 等中断：必须杀掉 pi 子进程，否则孤儿 pi
+                # 会在后台继续对目标发请求（合规风险 + 空烧 token），再原样抛出
+                proc.kill()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                _write(lock, logf, f"# --- killed: interrupted, pi child reaped ---", tee_console, tag=tag)
+                raise
             reader.join(timeout=5)
         except FileNotFoundError as e:
             _write(lock, logf, f"# --- failed to spawn pi: {e} ---", tee_console, tag=tag)
@@ -487,43 +650,3 @@ def run_pi_session(
         encoding="utf-8",
     )
     return exit_code
-
-
-def extract_flag_candidates(work_dir: Path, log_path: Path) -> List[str]:
-    found: List[str] = []
-    for name in ("loot.txt", "flag.txt"):
-        flag_file = work_dir / name
-        if not flag_file.is_file():
-            continue
-        for line in flag_file.read_text(encoding="utf-8", errors="replace").splitlines():
-            s = line.strip()
-            if s:
-                found.append(s)
-
-    text = ""
-    if log_path.is_file():
-        text = log_path.read_text(encoding="utf-8", errors="replace")
-    # also scan session jsonl under work_dir
-    session_dir = work_dir / ".pi-sessions"
-    if session_dir.is_dir():
-        for p in session_dir.glob("*.jsonl"):
-            try:
-                text += "\n" + p.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                pass
-    pats = [
-        r"flag\{[^\n\r]{1,200}\}",
-        r"FLAG\{[^\n\r]{1,200}\}",
-        r"[a-z]{2,12}\{[^\n\r]{4,200}\}",
-    ]
-    for pat in pats:
-        for m in re.finditer(pat, text, flags=re.I):
-            found.append(m.group(0))
-
-    out: List[str] = []
-    seen = set()
-    for f in found:
-        if f not in seen:
-            seen.add(f)
-            out.append(f)
-    return out

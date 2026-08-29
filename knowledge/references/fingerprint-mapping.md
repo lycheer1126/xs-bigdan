@@ -59,7 +59,8 @@ Test these paths first:
 | `__NUXT__` | Nuxt.js | SSR props analysis |
 | `csrfmiddlewaretoken` | Django | `/admin/`, debug mode, SQLi |
 | "Whitelabel Error Page" | Spring Boot | Actuator, Swagger, Druid |
-| "Whoops, looks like" | Laravel | `.env`, debug mode |
+| JSON `{"timestamp":..,"status":..,"error":..,"path":..}` | Spring Boot 默认错误体（含 403/404 响应） | Actuator, Swagger, Druid |
+| "Whoops, looks like something went wrong" | Laravel | `.env`, debug mode |
 | "Django Debug Page" | Django | Debug mode, SSTI |
 | "Traceback (most recent call)" | Flask/Python | Debug mode, SSTI |
 
@@ -146,6 +147,24 @@ Send one request each, observe response code. 200/403/401 = endpoint exists. 404
 | `*.qiniucdn.com` | Qiniu | Upload credential leak |
 | CF-RAY header | Cloudflare | Find origin IP, test origin directly |
 | `X-Akamai-Request-BC` | Akamai | Find origin IP |
+
+### 7b. WAF 被动识别签名（Phase 0 Step 0 专用——只看响应头/错误页,不主动探测）
+
+| 响应头特征 | 产品 | 处置 |
+|-----------|------|------|
+| `CF-RAY` / `__cfduid` / `Server: cloudflare` | Cloudflare WAF+CDN | SAFE MODE;找源 IP(§9) |
+| `X-Akamai-Request-BC` / `Server: AkamaiGHost` | Akamai | SAFE MODE;找源 IP |
+| `X-Iinfo` / `visid_incap_*` / `incap_ses_*` | Imperva (Incapsula) | SAFE MODE |
+| `X-Amz-Cf-Id` / `X-Cache: Hit from cloudfront` | AWS CloudFront | 找源 IP;测缓存行为 |
+| `X-WAF-*` / `Server: aliws` | 阿里云 WAF | SAFE MODE |
+| `stgw_*` / `TencentCloudWAF` | 腾讯云 WAF | SAFE MODE |
+| `iflysec: Herald` | 讯飞自研 WAF | SAFE MODE |
+| `X-Served-By` / `X-Cache-Hits` | Fastly | 缓存规则测试 |
+| 拦截响应体含 waf/防火墙/blocked 关键字 + 固定长度 | 通用 WAF | SAFE MODE;记指纹 |
+
+**SAFE MODE 量化规则**（确认 WAF 后全程生效）: 敏感路径单请求、间隔 3-8s、每分钟 ≤3 条
+admin/actuator 类路径; **未知栈 + WAF = 跳过全部 admin 路径主动探测**,直接转 §2 JS 被动分析。
+结论写入 `evidence/_fingerprint.md`（linkage 门"WAF 状态已确认"的证据载体）。
 
 ---
 

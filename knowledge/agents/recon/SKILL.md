@@ -1,7 +1,7 @@
 ---
 name: recon-agent
 description: >
-  Reconnaissance specialist. 双通道（雪瞳+自主探测）JS文件全量采集与深度分析，
+  Reconnaissance specialist. 双通道（browser_probe 无头采集+自主探测）JS文件全量采集与深度分析，
   技术栈指纹识别，API端点+完整请求签名提取（方法/Content-Type/参数/Auth），
   SPA路由发现，硬编码凭据提取，源码泄露检测，依赖版本扫描与CVE匹配。
   产出: _endpoint_params.json + _secrets_found.json + _leaked_values.json 初始值池。
@@ -29,7 +29,7 @@ metadata:
 Sub-Phase A: Passive Recon + JS 采集
   ├── 0. 被动信息收集（crt.sh, wayback, favicon）
   ├── 1. 技术栈指纹
-  ├── 2. 双通道 JS 采集（雪瞳 + 自主探测）
+  ├── 2. 双通道 JS 采集（browser_probe + 自主探测）
   └── 3. JS 深度分析（★最重要）
 
 Sub-Phase B: Source Leak + Dependency Scan
@@ -123,9 +123,9 @@ python3 -c "import mmh3, requests, codecs; r=requests.get('${TARGET}/favicon.ico
 
 ```
 Step 0 — 先找厂商GitHub/Gitee组织（不要直接全局搜索）:
-  ① GitHub MCP: search_users("{company_name}") → 找官方账号
-  ② GitHub MCP: search_repositories("{company_name}") → 找到组织后 list_org_repos
-  ③ Gitee MCP: 同步执行（国内厂商Gitee泄露概率更高，优先翻）
+  ① GitHub 搜索 API(curl,无MCP): api.github.com/search/users?q="{company_name}" → 找官方账号
+  ② api.github.com/search/repositories?q="{company_name}" → 组织仓库列表
+  ③ Gitee 搜索 API 同步执行（国内厂商Gitee泄露概率更高，优先翻; gitee.com/api/v5）
   ④ 找不到Org → 回退全局搜索: "{domain} password" "{domain} api_key" "{domain} config"
   ⑤ 无公开仓库/组织（中小企业常见）→ 替代方案:
      · 搜索公司域名+关键词: "{domain} password" "{domain} api_key" "{domain} config"
@@ -170,26 +170,19 @@ Step 2 — 凭据回注（MANDATORY — 组合拳核心）:
 
 ### 2. 双通道 JS 采集 ★
 
-#### 通道 A：雪瞳注入 (snow_eyes_inject.js)
+#### 通道 A：browser_probe 动态采集（原雪瞳能力的等价实现）
 
 ```
-在页面加载后立即执行，一次性提取:
-  → chrome-devtools_evaluate_script
-    注入 {SKILL_DIR}/scripts/snow_eyes_inject.js
-  → 自动收集:
-    · Vue Router 路由（自动解除auth guards）
-    · 全量API路径（绝对/相对）
-    · 域名/IP/手机号/邮箱/JWT Token
-    · 凭据(password=xxx, secret=xxx)
-    · Cookie/Token键值对
-    · AK/SK云密钥(AKIA/LTAI/AIza...)
-    · GitHub链接/公司名/Windows路径
-    · JS文件/Vue文件/文档文件/图片
-  → 结果保存到 findings/_interim-phase1.md "雪瞳快速扫描"节
+browser_probe.py snow <url> --save evidence/snow.json  # 雪瞳注入:26类前端信息一次提取(Vue路由/API/JWT/AK-SK/PII)
+browser_probe.py open <url> --xhr 30 --console 20   # 渲染后 DOM/XHR/console 一次拿全
+browser_probe.py chunks <url> --save evidence/js/   # 枚举含懒加载 chunk 的全部 JS 并落盘
+browser_probe.py js <url> "<expr>"                  # 页面内执行: 路由/全局变量/hook fetch
+  常用表达式: Object.keys(window.__vue_app__) / document.querySelectorAll('[href*=".js"]')
+敏感信息正则扫描: 对落盘 JS 跑 references/js-extraction-regexes.md 模式库
+  (JWT/云AK-SK/私钥/DB连接串/内网IP/手机号/风险变量名——FindSomething+雪瞳能力合集)
 
-注意: 雪瞳是快速补充，不能替代Step 3 JS落盘。
-      雪瞳只提取页面当前DOM+内联JS中可见的信息。
-      Webpack懒加载chunk和动态import模块仍需 JS落盘+本地grep分析。
+注意: browser_probe 只提取页面当前DOM+内联JS可见信息,不能替代 Step 3 JS 落盘。
+      Webpack 懒加载 chunk 和动态 import 模块仍需 chunks --save + 本地 grep 分析。
 ```
 
 #### 通道 B：自主探测
@@ -205,10 +198,10 @@ cat wayback_js_urls.txt  # 从 Passive Recon 获得
 cat wayback_js_urls.txt page_js.txt | sort -u > all_js_urls.txt
 
 # 全部下载到本地
-mkdir -p downloaded/${TARGET_HOST}/js/
+mkdir -p evidence/js/
 while IFS= read -r url; do
   fname=$(echo "$url" | tr '/:.?=&' '_' | sed 's/_\+/_/g')
-  curl -s "$url" -o "downloaded/${TARGET_HOST}/js/${fname}.js"
+  curl -s "$url" -o "evidence/js/${fname}.js"
 done < all_js_urls.txt
 ```
 
@@ -231,11 +224,11 @@ done < all_js_urls.txt
   □ 提取请求拦截器逻辑（公共参数注入）
   □ 提取加密函数签名（CryptoJS/WebCrypto）
 
-最终产出:
-  downloaded/{domain}/_endpoint_params.json  ← ★最重要★
-  downloaded/{domain}/_secrets_found.json
-  downloaded/{domain}/_hash_routes.txt
-  downloaded/{domain}/_analysis_summary.md
+最终产出(全部进 evidence/,供门控与下段交接):
+  evidence/_endpoint_params.json  ← ★最重要★(recon 门验收物)
+  evidence/_secrets_found.json
+  evidence/_hash_routes.txt
+  evidence/_fingerprint.md (WAF/技术栈,methodology §0 Step 0-1)
 ```
 
 **_endpoint_params.json 格式（照这个来）：**
@@ -311,7 +304,7 @@ done < all_js_urls.txt
 操作流程:
 1. 按顺序逐个点击每个可见的导航项（菜单/选项卡/功能按钮/分页）:
    → 每点一下 → 检查新出现的JS文件（chrome-devtools_list_network_requests filter:resourceType=script）
-   → 把新增的JS文件下载到 downloaded/{target}/js/
+   → 把新增的JS文件下载到 evidence/js/
    → 新出现的API路径记录到发现列表
 2. 特别关注: 用户管理/订单/设置/导出/XX管理 等管理类功能页面
 3. 如果发现下拉菜单/树形菜单 → 展开所有子项再走一遍步骤1
@@ -359,7 +352,7 @@ Step 2 — 独立SPA判定（关键: 不是所有返回HTML的路径都是独立
 
 Step 3 — 对每个确认的独立SPA:
   → 提取其JS bundles（不同构建 = 不同API表面）
-  → 注入雪瞳提取其路由
+  → 用 browser_probe chunks/js 提取其路由
   → 从JS中grep管理API路径
   → 作为独立攻击面运行完整Phase 1-3
   → 将提取到的管理API用普通用户Token测试垂直越权

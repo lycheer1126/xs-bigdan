@@ -2,20 +2,66 @@
 
 给 Agent 的浓缩操作手册:按序推进,验证优先,证据完整,判断力来自本文件,操作细节按需读 knowledge/。
 
-## 0. 进入目标
+## 阶段与门控总览（Safe-First，动手前先读这节）
 
-1. 读 `BRIEF.md`,记下全部目标 URL、授权边界与当前段任务。
-2. 对每个 URL 用 `xsreq.py <url>` 看指纹:状态码/耗时/长度/关键头/首页。
-3. 记录:Server / X-Powered-By / Set-Cookie / 跳转链 / 首页框架特征。
-4. **WAF 探测**(先于一切测试):错误页特征、响应头、拦截响应。有 WAF → 全程 SAFE MODE(单请求间隔 3-8s);无 WAF → 可全量,限速 QPS≤3。
-5. 当前段要读的知识文件见 BRIEF 的"读取索引"节;未列出的按本文件第 13 节表自主选择。
+> 本节是阶段推进的权威定义。**门的证据必须是落盘产物**（契约文件/jsonl/FINDING 行/digest），
+> 不是你的记忆——harness 每段读取这些产物推断阶段并写进 BRIEF「阶段判定」，与本节互为校验。
 
-## 1. 指纹与入口
+**Safe-First 铁律**：🟢 安全侦察 → 🟡 普通测试 → 🔴 高危探测 → 报告。
+先干完所有不会触发 WAF 的事，数据攒够了再碰高危——**被封之前攒够数据 = 策略成功**。
+门没过，不进下一层；条件不满足的阶段，跳过原因写进 digest 的「已试路径」或「下一步建议」，禁止静默跳过。
 
-- 框架指纹:响应头、HTML 注释、generator meta、静态资源路径、报错页特征。
-- Spring Boot:/actuator、/actuator/health、/env、/heapdump。PHP:/www.zip、/.env、/index.php.bak。Python:/admin/、/api/docs。.NET:/web.config。
-- **快速枚举泄露路径:`xsenum.py <base-url>`**(内置 90+ 条,自动标出与 404 基线不同的异常项)。
-- 401/403 接口是"门":记录,后续配 token/绕过再试(Phase 4 思路,不在此耗)。
+| 阶段 | 层 | 类型 | 进入门（全部满足才许进） | 细节 |
+|---|---|---|---|---|
+| recon | 🟢 | 强制 | ——（起点） | §1-2 |
+| linkage | 🟡 | 强制 | WAF 状态已确认；recon 门（下表）已过 | §3-4 |
+| deep | 🟡 | 条件 | linkage 门已过。无 JWT 且无加密体 → 跳过并写明原因 | §5 |
+| highrisk | 🔴 | 条件 | linkage 已开工；已有 ≥1 个 CONFIRMED；WAF 存在则全程 SAFE MODE | §6 |
+| report | — | 强制 | 全部攻击面收尽或 digest 标注「建议结束」 | §7/§10 |
+
+**门的清单（harness 用同一份产物判定阶段）**：
+
+- **recon 门**：`evidence/_endpoint_params.json` 存在 + `_meta.analysis_completeness ≥ 0.8` + endpoints ≥ 3（§2 的强制产出，未达标=JS 分析没做完，不进 🟡）
+- **指纹产物**：`evidence/_fingerprint.md`（WAF 状态/技术栈/CDN，§0 Step 0-1 强制落盘）——linkage 门"WAF 状态已确认"的证据载体
+- **linkage 消费**：`evidence/_linkage_results.jsonl` 至少 1 条结果（§3 的测一条记一条）
+- **highrisk 门**：会话打印过 FINDING 行（harness 记入 runlog 的 CONFIRMED 计数 ≥1）
+- **report**：digest 写「建议结束」
+
+**跨阶段反馈**（源自 mastermind Phase 3.5，非线性执行）：拿到新 Token/ID/Key → 立即回溯（decode/查同类端点）+ 前推（用新身份测越权）——留在本阶段的发现是半个发现。
+
+## 0. 进入目标（Phase 0:先被动后主动,指纹与 WAF 识别）
+
+**先被动后主动**:响应头能看出来的,不要用主动探测去换——WAF 状态未知前,每一次主动请求都可能触发封禁。
+
+1. 读 `BRIEF.md`,确认目标、范围与当前段阶段判定。
+2. **Step 0 — WAF/CDN 被动识别(先于一切路径探测)**:每个 URL 发 1 次 `xsreq.py <url>`,只看响应头与错误页,不做目录枚举:
+   Cloudflare(`CF-RAY`/`__cfduid`) | Akamai(`X-Akamai-Request-BC`) | Imperva(`X-Iinfo`/`visid_incap_*`) |
+   CloudFront(`X-Amz-Cf-Id`/`X-Cache: Hit from cloudfront`) | 阿里云WAF(`X-WAF-*`/`aliws`) |
+   腾讯云WAF(`stgw_*`/`TencentCloudWAF`) | 讯飞自研(`iflysec:Herald`) | Fastly(`X-Served-By`/`X-Cache-Hits`)。
+   完整签名表 `fingerprint-mapping.md §7b`(命中即读)。
+   **结论必须落盘**:WAF 状态(无/WAF类型/CDN类型)+技术栈 写进 `evidence/_fingerprint.md`——它是 linkage 门"WAF 状态已确认"的证据载体。
+3. **Step 1 — 技术栈指纹(同一响应里免费拿,一并落盘 _fingerprint.md)**:
+   响应头(Server/X-Powered-By) | Cookie 名(JSESSIONID→Java, PHPSESSID→PHP, ASP.NET_SessionId→.NET) |
+   HTML(`<div id="app">`→Vue, `id="root"`→React, `ng-app`→Angular) | 错误页(Whitelabel→Spring Boot, Whoops→Laravel, Spring JSON 错误体) |
+   JS 全局(`__vue_app__`/`__webpack_require__`)。
+   **栈指纹决定后续测什么**:Java→Actuator/Swagger/Druid;PHP→.env;Python→SSTI;Node→原型污染/GraphQL(映射表 fingerprint-mapping.md §8)。
+4. **WAF 处置**:WAF detected → 全程 SAFE MODE(敏感路径单请求、间隔 3-8s、每分钟 ≤3 条 admin/actuator 类);
+   **未知栈 + WAF = 跳过全部 admin 路径主动探测**,直接进 §2 JS 分析(被动,不触发 WAF)。无 WAF → 可全量,限速 QPS≤3。
+5. **Step 2 — 源码泄露搜索(GitHub/Gitee,不碰目标)**:厂商组织名/`{domain} password|api_key|config` 双通道
+   (国内厂商 Gitee 优先),提取凭据 → 值池待联动。细节 `skills/source_leak/SKILL.md`。
+6. **Step 3 — 被动侦察(秒级,不碰目标)**:crt.sh 子域 + wayback 历史 JS。细节 `skills/passive_recon/SKILL.md`。
+7. 本段知识文件见 BRIEF「读取索引」;未列出的按第 13 节表自主选择。
+
+## 1. 主动探测入口（WAF 状态确认之后才允许）
+
+- **快速枚举泄露路径:`xsenum.py <base-url>`**(内置 90+ 条,自动 404 基线标异常)。**只测当前栈匹配的路径**;SAFE MODE 时加 `--concurrency 1 --limit 40`:
+  Spring Boot→/actuator /env /heapdump | PHP→/.env /www.zip /index.php.bak | Python→/admin/ /api/docs | .NET→/web.config。
+  WAF 存在 → SAFE MODE 限流,未知栈 + WAF 一律不探 admin。
+- **字典分级**(BRIEF 工具节有完整路径):paths(轻探,默认) → quickhits(标准) → common(全量) → raft-small(深扫)。
+  无 WAF 才允许逐级加深;深扫前先确认轻探档有异常信号,禁止一上来就 raft。
+- 本机装了 EHole(`tools/bin/ehole.exe finger -u <url>`)时可用其指纹库辅助识别——**仅用指纹模式,
+  禁用其漏洞扫描模块**(自动化漏扫违反 TIER 合规);未安装不等待,响应头指纹已够。
+- 401/403 接口是"门":记录,后续配 token/绕过再试,不在此耗。
 - 指纹→测试映射、WAF 签名表:`knowledge/references/fingerprint-mapping.md`(命中即读)。
 
 ## 2. JS 分析(优先做,产出契约)
@@ -135,7 +181,7 @@
 - 多租户 → 拿凭据后以 victim 身份操作,越权需两个身份的响应差异。
 - 502/网关错 → 等 2 分钟轮询,仍无写 TRIED。
 
-## 13. 知识读取表(完整索引,按需 cat)
+## 13. 知识读取表(完整索引,按需 cat;BRIEF 的读取索引由 harness 按阶段状态机注入,本表为完整兜底)
 
 **Skills(操作细节,阶段命中即读):**
 | 文件 | 何时读 |
@@ -158,13 +204,16 @@
 | knowledge/skills/dependency_cve/SKILL.md | 组件版本指纹命中时 |
 | knowledge/skills/vuln_classes/SKILL.md | Phase 5 漏洞百科 |
 | knowledge/skills/ai_security/SKILL.md | 目标是 AI/LLM 应用 |
+| knowledge/skills/ai_chat_xss/SKILL.md | AI 对话/聊天类目标(前端 XSS 升级链: self-XSS→存储型→IPC 接管,同构通杀) |
+| knowledge/skills/xs_auth/SKILL.md | 存在登录口/认证逻辑审计需求(账号池注入后优先读:JS审计→定向验证→接管链,含 OAuth/找回密码白名单) |
 
 **References(查证资料,特征命中即读):**
 | 文件 | 何时读 |
 |---|---|
 | knowledge/references/fingerprint-mapping.md | Phase 0 必读(指纹→测试映射+WAF 签名) |
+| knowledge/references/js-extraction-regexes.md | Phase 1 JS 落盘后:敏感信息 grep 模式库(FindSomething+雪瞳合集,漏抓就往表里加) |
 | knowledge/references/compliance-rules.md | Phase 0 + 报告前(SRC 合规 TIER 分级) |
-| knowledge/references/decision-trees.md | Phase 2-3 参数匹配漏洞决策树 |
+| knowledge/references/decision-trees/README.md | Phase 2-3 参数特征命中:先读索引,再精读对应§决策树小文件(29棵) |
 | knowledge/references/response-chaining.md | Phase 2-5 响应链方法论 |
 | knowledge/references/discovery-amplification.md | Phase 2(端点→同类路径/参数榨干) |
 | knowledge/references/high-risk-probing.md | Phase 6 高危探测细节 |

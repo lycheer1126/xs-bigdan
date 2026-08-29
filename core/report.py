@@ -53,7 +53,7 @@ def _check_evidence(job_dir: Path, f: dict) -> tuple:
     """
     if not f.get("file"):
         return False, "无证据文件名"
-    evp = job_dir / "evidence" / f["file"]
+    evp = job_dir / "evidence" / Path(f["file"]).name
     if not evp.is_file():
         return False, f"证据文件缺失: {f['file']}"
     text = evp.read_text(encoding="utf-8", errors="replace").strip()
@@ -67,11 +67,13 @@ def _finding_entry(i: int, f: dict, job_dir: Path) -> List[str]:
     lines.append(f"- 类型: {f.get('type') or '未标注'}")
     lines.append(f"- 状态: {f.get('status') or 'CONFIRMED'}")
     if f.get("file"):
-        lines.append(f"- 证据文件: `evidence/{f['file']}`")
+        lines.append(f"- 证据文件: `evidence/{Path(f['file']).name}`")
         ok, reason = _check_evidence(job_dir, f)
         if not ok:
             lines.append(f"- ⚠️ 证据检查未过: {reason}")
-        evp = job_dir / "evidence" / f["file"]
+        if f.get("triage_reason"):
+            lines.append(f"- ⚠️ triage 硬门: {f['triage_reason']}")
+        evp = job_dir / "evidence" / Path(f["file"]).name
         if evp.is_file():
             lines.append("- 证据内容:")
             lines.append("")
@@ -80,7 +82,53 @@ def _finding_entry(i: int, f: dict, job_dir: Path) -> List[str]:
     return lines
 
 
+# ---------------------------------------------------------------- triage 硬门（源自 mastermind triage_gate 可机械化子集）
+
+_URL_RE = re.compile(r"https?://[^\s'\"<>]+")
+_IMPACT_HINT_RE = re.compile(r"(能|可|导致|任意|越权|接管|泄露|泄漏|执行|删除|读取|修改|获取|绕过|冒充|遍历|导出)")
+
+
+def _triage_check(finding: dict, ev_text: str) -> List[str]:
+    """CONFIRMED 硬门可机械化子集（6 项中的 4 项）：不过 → 报告内降级 PENDING 并写明原因。
+
+    confidence 与 data_not_public 留在 Agent 侧（FINDING 行未扩展，机械判定不可靠），
+    由 methodology §10 确认三问 + UI 可见性预检覆盖。
+    """
+    reasons: List[str] = []
+    if not (finding.get("type") or "").strip():
+        reasons.append("无漏洞类型")
+    if not _URL_RE.search(ev_text or ""):
+        reasons.append("证据中无目标 URL")
+    m = re.search(r"(?:影响|危害)\s*[:：]?\s*(.{5,})", ev_text or "", re.S)
+    impact_desc = (m.group(1)[:300] if m else "").strip()
+    if not _IMPACT_HINT_RE.search(impact_desc):
+        reasons.append("无影响描述或未写明具体后果")
+    return reasons
+
+
+def _apply_triage_gate(summaries: List[dict], jobs_dir: Path) -> int:
+    """对全部 CONFIRMED findings 跑硬门;不过 → 原地降级 PENDING 并标注 triage_reason。返回降级数。"""
+    demoted = 0
+    for s in summaries:
+        job_dir = jobs_dir / s["id"]
+        kept = []
+        for f in s.get("findings", []):
+            if (f.get("status") or "CONFIRMED") == "CONFIRMED":
+                evp = job_dir / "evidence" / Path(f.get("file") or "_missing_").name
+                ev_text = evp.read_text(encoding="utf-8", errors="replace") if evp.is_file() else ""
+                reasons = _triage_check(f, ev_text)
+                if reasons:
+                    f = {**f, "status": "PENDING",
+                         "triage_reason": "；".join(reasons) + "（原判 CONFIRMED，triage 硬门降级）"}
+                    demoted += 1
+            kept.append(f)
+        s["findings"] = kept
+    return demoted
+
+
 def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> None:
+    demoted = _apply_triage_gate(summaries, jobs_dir)
+
     lines: List[str] = []
     lines.append(f"# xs-bigdan 渗透测试报告")
     lines.append("")
@@ -99,6 +147,10 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
 
     lines.append(f"## 总体结论")
     lines.append("")
+    if demoted:
+        lines.append(f"> ⚠️ triage 硬门已将 {demoted} 项 CONFIRMED 降级为 PENDING"
+                     f"（缺目标 URL / 缺影响描述等,详见各条目标注）——提交前请人工复核或补证据。")
+        lines.append("")
     if n_conf:
         lines.append(f"本次共确认 **{n_conf}** 项可利用漏洞"
                      f"{f'，另有 {n_pend} 项待确认、{n_info} 项信息类' if n_pend or n_info else ''}，详见各目标章节。")
@@ -131,9 +183,11 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
             lines.append(f"- 耗时: {s.get('elapsed_sec')}s / 预算 {s.get('job_timeout_sec', '?')}s"
                          f"（段上限 {s.get('seg_timeout_sec', '?')}s）")
         for seg in segs:
+            err = (seg.get("last_error") or "").strip()
             lines.append(f"  - 段{seg['seg']}: exit={seg['exit_code']}{'（超时被终止）' if seg.get('timed_out') else ''} "
                          f"发现={len(seg.get('findings', []))} digest={'有' if seg.get('digest_saved') else '无'} "
-                         f"日志={seg.get('log', '')}")
+                         f"日志={seg.get('log', '')}"
+                         + (f"  ⚠️ 失败原因: {err}" if err else ""))
         lines.append("")
 
         findings = s.get("findings", [])
