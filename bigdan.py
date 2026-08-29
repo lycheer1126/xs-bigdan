@@ -46,7 +46,7 @@ def load_dotenv(path: Path) -> None:
         os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
-load_dotenv(Path(__file__).resolve() / ".env")
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 JOBS_DIR = Path(os.environ.get("BIGDAN_JOBS_DIR", "runtime/jobs"))
 OUTPUTS_DIR = Path(os.environ.get("BIGDAN_OUTPUTS_DIR", "runtime/outputs"))
