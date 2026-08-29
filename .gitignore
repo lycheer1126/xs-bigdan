@@ -28,3 +28,7 @@ credentials.txt
 
 # 目标清单含真实在测目标,公开仓库不泄漏(模板: targets.example.txt)
 targets.txt
+
+# 实战战果台账与案例(含目标关联信息,不入公开仓库)
+knowledge/experience/
+jobs/

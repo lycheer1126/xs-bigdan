@@ -53,7 +53,7 @@ def _run(sub: str, args) -> int:
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=["--no-proxy-server", "--ignore-certificate-errors"])
         ctx = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36",
             viewport={"width": 1440, "height": 900},
@@ -216,19 +216,22 @@ def _run(sub: str, args) -> int:
                 return 1
             print(f"inputs: {json.dumps(info['inputs'], ensure_ascii=False)[:500]}")
             filled = 0
-            for inp in info["inputs"]:
-                sel = f"input[name='{inp['name']}']" if inp["name"] else f"input[id='{inp['id']}']"
-                if not inp["name"] and not inp["id"]:
-                    continue
+            # 优先按 name/id 匹配；无 name/id 的 element-plus 输入框按位置填充
+            text_inputs = [i for i in info["inputs"] if i["type"] in ("text", "email", "tel", "username", "number", "")]
+            pwd_inputs = [i for i in info["inputs"] if i["type"] == "password"]
+            filled = 0
+            if text_inputs:
+                sel = f"input[name='{text_inputs[0]['name']}']" if text_inputs[0]["name"] else "input[type='text']"
                 try:
-                    if inp["type"] in ("text", "email", "tel", "username", ""):
-                        page.fill(sel, args.user)
-                        filled += 1
-                    elif inp["type"] == "password":
-                        page.fill(sel, args.passwd)
-                        filled += 1
-                except Exception:  # noqa: BLE001
-                    pass
+                    page.fill(sel, args.user, timeout=3000); filled += 1
+                except Exception:
+                    page.locator("input").first.fill(args.user, timeout=3000); filled += 1
+            if pwd_inputs:
+                sel = f"input[name='{pwd_inputs[0]['name']}']" if pwd_inputs[0]["name"] else "input[type='password']"
+                try:
+                    page.fill(sel, args.passwd, timeout=3000); filled += 1
+                except Exception:
+                    page.locator("input[type='password']").first.fill(args.passwd, timeout=3000); filled += 1
             print(f"filled: {filled} input(s)")
             # 找提交按钮
             try:

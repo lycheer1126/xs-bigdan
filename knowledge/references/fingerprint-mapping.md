@@ -44,6 +44,11 @@ Test these paths first:
 | `Set-Cookie: PHPSESSID=` | PHP | PHPInfo, file include |
 | `Set-Cookie: ASP.NET_SessionId=` | ASP.NET | ViewState, XXE |
 | `Set-Cookie: laravel_session=` | Laravel | `.env`, debug mode |
+| `Set-Cookie: confluence-language=` / 响应头 `X-Confluence-Request-Time` | Atlassian Confluence | OGNL RCE (CVE-2022-26134, 见 cve-chains) |
+| 路径 `/index.action` `/login.action` + 报错含 `webwork` | Confluence/WebWork | 同上 |
+| 页面 title `nginxWebUI` / 路径 `/adminPage/login` / Cookie `SOLONID` | nginxWebUI(Nginx 面板, Solon 框架) | 前台 runCmd RCE(实战案例见 experience/rce.md 案例2) |
+| FOFA `icon_hash="-1619753057"` / 路径 `/papi/em/transform/getEmDsList` | 泛微 E-cology 10 | 未授权敏感信息泄露(见 cve-chains 泛微章节) |
+| 非标端口(:8000/:8888/:9999) + 面板类登录页 | 各类运维面板(宝塔/1Panel/nginxWebUI...) | 面板 Nday 高发区, 按产品对号 |
 
 ---
 

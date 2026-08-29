@@ -6,6 +6,20 @@
 - 已发现管理相关路径（/admin/ /manage/ /system/ /console/ 等）
 - JS 或路由中包含 user/role/perm/config/export/sync 等管理功能关键字
 
+### 实战模式: 登录响应包 roleCode 篡改（2026-08 实战验证）
+
+```
+登录响应 JSON 含 roleCode/role/isAdmin/type 权限字段?
+├── 侦察: GET /role/list /role/all /role/query?pageSize=10000 (普通用户Token)
+│   → 常无权限校验, 直接泄露全角色表(roleCode↔roleName 对照 = 越权参数字典)
+├── 篡改: 注销→重新登录→Burp 拦截登录响应→roleCode 改为最高权限值(如 2→1)→放行
+├── 判定: 前端渲染管理界面?
+│   ├── 是 → 再打管理 API 确认服务端是否校验(接受=服务端失守高危; 拒绝=纯前端越权,中危)
+│   └── 页面可进但 API 全 403 → 标 PENDING(前端越权,无实际危害)
+└── 合规: 仅用自注册账号; 不改他人数据; 留证即停
+```
+来源: 投保案例征集系统实战(roleCode 2→1 接管超管), 详见 knowledge/experience/认证接管.md
+
 ### 决策流程
 
 ```

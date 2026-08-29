@@ -186,6 +186,14 @@
 | S11 | 2026-08-08 | 绑定/存在状态枚举口 | 遍历发码/重置/token 端点，对比「未绑定/登录名不存在」错误码（23009/201129/2011124） | 独立错误码 + 免验证码 + 无限速 = 批量枚举口（token 端点类优先级最高） | 低（辅助） |
 | S12 | 2026-08-08 | 前端 mock 登录识别 | 检查登录流程是否有真实后端接口；JS 中找硬编码 SET_TOKEN 固定 token/固定角色、路由守卫仅查 token 存在性 | 登出后手动写入任意 token（localStorage）可进入受保护后台页面 = 任意伪造 token 进后台 | 高 |
 
+## 自动登录脚本（实战验证）
+
+`scripts/auto_login_cantonfair.py` + `scripts/login_probe_consolidated.py` —— 广交会实战验证的完整登录自动化：
+- playwright + **ddddocr** 图形验证码 OCR + **Vue 组件树遍历**找滑块组件直接置状态（绕滑块）
+- **Vue 响应式填值**：native setter + input event（element-plus 无 name/id 时用位置+原生 setter）
+- 双通道 token 提取：localStorage（base64 key 解码）+ Vuex store getter
+- 新目标复用方法：改 URL + 账号密码 → 跑一遍 → 看报错 → 逐步适配目标特有的表单结构
+
 ## 工具参考
 
 - JS 定位/执行/hook：`tools/bin/browser_probe.py`（open/chunks/js/login 四子命令）
