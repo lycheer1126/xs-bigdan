@@ -1,123 +1,119 @@
 # xs-bigdan
 
-本地 SRC 授权渗透测试 Agent：你提供已收集的 URL 清单，它自动完成黑盒测试并输出 Markdown 报告。
+**本地 SRC 授权渗透测试流水线**：你提供授权目标，AI Agent 按阶段方法论自动完成黑盒测试并产出带证据的 Markdown 报告；确定性调度器负责时间控制、质量闸门和状态管理，人只做三件事——**给授权、给测试账号、复核报告**。
 
-> **规范使用文档见 [docs/USAGE.md](docs/USAGE.md)**：目录规范 / 首次使用 / 日常操作 / 时间模型 / 工具管理 / 清理维护 / 常见问题。
+> 📖 操作规范见 [docs/USAGE.md](docs/USAGE.md) · 架构与全目录详解见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+>
+> ⚠️ **仅限明确授权的目标**（SRC 收录 / 书面委托）。未授权渗透测试违法，后果自负。
 
-核心理念（源自 pi-recon / 百度 Agent 攻防赛前 15 经验）：
+---
 
-- **Harness 做减法**：只负责读目标、写简报、分段执行、硬超时、digest 交接、汇总报告。
-- **模型决定怎么想，工具决定能看见什么**：pi agent 在同一段上下文里连续调用 curl/python 完成侦察→测试→验证。
-- **阶段由产物门控（Safe-First）**：🟢侦察→🟡联动/深挖→🔴高危→报告，进度=已通过的门（落盘产物）而非已消耗的时间；段只是上下文保鲜切片（源自 mastermind 的 Phase Gate/条件矩阵）。
-- **共享证据，不共享判决**：会话日志、evidence 证据文件全量保留；段间只传 RECON_DIGEST 交接，不压缩原始痕迹。
-- **不固化失败**：「枚举 miss ≠ 端点不存在」，「401 是门存在，不是此路失败」。
+## 它是怎么工作的
 
-## 架构
+一次任务分五个阶段顺序推进，**进入下一阶段的条件是"产出物落盘并通过检查"，而不是时间到了**：
 
 ```
-bigdan.py            主调度（入口，留根）：目标读取 → BRIEF → 分段执行 → digest 交接 → 汇总报告
-core/                核心模块包（升级主要改动区）
-  agent_exec.py      pi 会话执行：tee 日志 + 心跳 + .pi-sessions jsonl 镜像 + 超时 kill
-  linkage.py         值池联动引擎：别名归一化 + 语义组 + 配对生成 + 消费闭环（_linkage_results.jsonl）
-  retry_detector.py  投降检测：中英文模式，命中即写 retry-prompt 强制换角度（最多 2 次）
-  report.py          汇总 findings + evidence → Markdown 报告（CONFIRMED/PENDING/INFO 三态分组）
-prompts/             system.md（纪律契约）+ methodology.md（13 节方法论速查 + 完整读取表）
-knowledge/           知识层（skills 18 / agents 7 / references 26 / scripts 7 参考），升级靠加文件
-webui/               Web 控制台（FastAPI）：任务管理/历史/配置，插件式模块，开发指南见 webui/README.md
-dev/                 开发辅助：smoke_lab / blackhole_lab 本地靶场 + watch_run_logs 实时观察
-docs/                USAGE.md 操作规范（README 在根）
-tools/               bin（xsreq/xsenum/probe + ffuf 等二进制）+ wordlists + downloads + 工具本体
-runtime/             运行产物（自动生成）：jobs/<目标id>/（断点）+ outputs/（报告）
+🟢 recon      指纹 + WAF 被动识别 + JS 全量落盘 + 接口契约
+     │ 门: 契约文件存在且完整度 ≥0.8、端点 ≥3
+     ▼
+🟡 linkage    全接口覆盖 + 值池联动（A 接口的响应值自动注入 B 接口）+ 无认证探测
+     │       （BRIEF 注入了测试账号时，先登录再打认证后攻击面：越权/IDOR）
+🟡 deep       JWT 分析 / 前端加密破解 / 端点榨干（无 JWT 且无加密体则跳过）
+     │ 门: 已确认 ≥1 个漏洞
+     ▼
+🔴 highrisk   高危探测（SQLi/CMD/SSTI/越权/导出），全程限速
+     ▼
+📋 report     汇总证据 → 报告（triage 硬门自动过滤不实发现）
 ```
 
-> 目录规范细节（各目录放什么、新知识入库时机）见 `knowledge/README.md`。
+每个阶段是一个**全新会话**执行（避免长上下文导致模型劣化），阶段之间靠结构化交接文档续命——所以可以跑到很晚、断了能续、状态不丢。
+
+## 核心特性
+
+| 特性 | 说明 |
+|---|---|
+| **阶段状态机** | 进度 = 已通过的门（落盘产物可验证），而非已消耗的时间；卡住自动停在原地等人，不硬闯 |
+| **批量任务队列** | 控制台整批粘贴 URL 自动建任务；全局串行绝不并行（保护目标和你的 IP），一个结束自动开始下一个 |
+| **测试账号池** | `credentials.txt` 写好账号，按目标自动注入任务简报——大部分高价值漏洞在登录之后 |
+| **误报硬门** | 报告生成时对每条 CONFIRMED 做机械检查（有 URL/有类型/有证据/有影响描述），不过自动降级并标注原因 |
+| **知识可积累** | 方法论/决策树/敏感信息模式库全部是 Markdown，实战学到什么就往里加什么，下个目标自动生效 |
+| **无人值守韧性** | LLM 限流自动重试（带预算）、超时强杀、失败原因写进报告、断点续打不丢发现、误操作中断不留孤儿进程 |
 
 ## 快速开始
 
-```bash
-# 1. 安装 pi agent（首次）
-npm i -g @earendil-works/pi-coding-agent@0.84.1
-
-# 2. 配置
-cp .env.example .env      # 填 BIGDAN_LLM_KEY（DeepSeek 直连 key）
-# 编辑 targets.txt（文件内注释即模板）填你收集的目标 URL
-
-# 3. 运行
-python bigdan.py                     # 跑全部目标
-python bigdan.py --only www-01       # 只跑某个目标
-python bigdan.py --dry-run           # 先看计划
-
-# 4. Web 控制台（可选，推荐日常入口）
-python -X utf8 -m webui.server       # http://127.0.0.1:8865
-```
-
-## 输入约定
-
-`targets.txt` 每行一个目标：`[id|]url[|备注]`。例如：
-
-```
-www-01|https://example.com|主站，重点测登录与API
-api-01|https://api.example.com|API网关
-```
-
-不填 id 时自动取 host 作为 id。测试范围严格限定在这些 host 内。
-
-## 输出
-
-- `runtime/outputs/report-<时间>.md`：报告（总体结论 + 每目标发现/未闭环线索/证据清单 + 通用修复建议）。
-- `runtime/jobs/<id>/`：完整原始数据——会话日志（含每次工具调用与响应）、每段 digest、evidence 证据文件、summary.json。
-
-## 工具矩阵（决定"能看见什么"）
-
-`tools/bin/` 下的工具由 `bigdan.py` 在生成 BRIEF.md 时自动写入「工具」段（绝对路径），prompt 里要求用 `python <绝对路径> ...` 调用（不依赖 PATH——Windows 下 bash 会解析到 WSL、PATH 注入不可靠）：
-
-- **`xsreq.py`** — AI 友好单请求工具：第一行 `[状态码] 耗时s | 长度B | Content-Type`，关键头一行并列，`--save` 存原始请求+响应做证据。设计目的：让模型一眼看到"某个 payload 多耗时 3 秒 / 某 Header 让长度突变"这类差异。
-- **`xsenum.py`** — 轻量目录枚举（ffuf 思想）：自动取 404 基线，输出对比表并标出 `[!] 异常` 项——异常项就是新节点，优先深挖。
-- **`tools/wordlists/`** — 内置字典：`paths.txt`（敏感路径 90+）、`params.txt`（参数名 60+）。
-
-**仓库自带二进制（`tools/bin/`，Windows amd64，2026-08-27 补齐）**：
-
-- **`ffuf.exe`** v2.1.0 — 目录/参数模糊测试（快速大字典场景替代 xsenum.py）
-- **`feroxbuster.exe`** v2.13.1 — 递归目录枚举（深层目录发现）
-- **`jadx.bat`** v1.5.1（wrapper → `tools/jadx/`，需本机 Java）— APK 反编译
-- **`cast.exe`** v1.7.1（→ `tools/foundry/`，同包含 forge/anvil/chisel）— 链上合约交互
-- **`sqlmap.bat`**（wrapper → `tools/sqlmap/`，纯 Python）— SQL 注入自动化
-- **`strings.exe`** v2.54（Sysinternals）— 二进制字符串提取
-
-`tools/jadx/`、`tools/foundry/`、`tools/sqlmap/` 为工具本体目录；原始 zip 存档在 `tools/downloads/`。
-
-**动态工具探测**：每次生成 BRIEF.md 时 `tools/bin/probe_tools.py` 扫描本机 PATH（nmap/ncat/httpx/arjun 等）与 `tools/bin/`、`tools/foundry/` 本地二进制（ffuf/feroxbuster/jadx/cast/sqlmap/strings），以及 Python 库（requests/Crypto/web3/bs4/ldap3/pyasn1），把实际可用清单写进 BRIEF「工具」段——模型只"看见"真实存在的工具；缺失的工具由 agent 在 RECON_DIGEST 里标 TOOL_MISSING（源自 pi-recon：harness 决定工具可见性）。
-
-## 模型选择
-
-默认 `deepseek-v4-flash`（快、便宜，适合大范围覆盖）。文章经验：**模型决定能力上限**，深挖单目标、面对复杂利用链时换更强模型：
+**依赖**：Python 3.10+、Node.js + [pi-coding-agent](https://github.com/badlogic/pi-mono)（`npm i -g @earendil-works/pi-coding-agent@0.84.1`）、DeepSeek API Key。
 
 ```bash
-python bigdan.py --model deepseek-v4-pro
+# 1. 配置密钥
+copy .env.example .env          # 填 BIGDAN_LLM_KEY（DeepSeek key）
+
+# 2. 填目标
+copy targets.example.txt targets.txt   # 每行一个 URL
+
+# 3. （推荐）准备测试账号 —— 认证后才有高价值漏洞
+copy credentials.example.txt credentials.txt
+
+# 4. 先看计划，再正式运行
+python bigdan.py --dry-run
+python bigdan.py
 ```
 
-## 断点续打（endgame 心态）
-
-每段收工都会写 `digest-*.md`（目标状态/已试路径/疑似点/下一步建议/TOOL_MISSING）。跑完一轮看报告后，想继续深挖某目标：
+**控制台方式（推荐日常使用）**：
 
 ```bash
-python bigdan.py --only <id>     # 保留 runtime/jobs/ 目录再跑，自动带上已有 digest 续打
+python -X utf8 -m webui.server        # 浏览器打开 http://127.0.0.1:8865
 ```
 
-不要删 `runtime/jobs/<id>/`——那是断点。Agent 也会在 digest 里写"建议结束"来提前收工（已测完时），你可以在报告里看到。
+任务页可**整批粘贴 URL** 创建任务（自动生成任务 ID，按粘贴顺序串行执行）；配置页可在线维护目标清单、测试账号池和 LLM 档位；历史页浏览报告。
 
-## Agent 与人的协作约定
+## 日常操作
 
-- 发现漏洞 → Agent 写 `evidence/` 证据文件（完整请求 + 关键响应 + 影响）并打印 `FINDING: 类型|标题|文件名`。
-- 判定标准：完整请求 + 可复现响应差异 + 明确安全影响；宁可漏报不可误报。
-- 段间交接用 `### RECON_DIGEST` 结构化块：目标状态/技术栈/攻击面/已确认发现/疑似点/已试路径/下一步建议。
-- 敏感数据只用于证明漏洞；本地授权测试（默认）证据/报告保留完整原始数据、不对外公开，无需脱敏。仅对外提交场景需在 BRIEF.md 声明后脱敏。
+| 操作 | 方式 |
+|---|---|
+| 跑全部目标 | `python bigdan.py` |
+| 只跑/续跑某目标 | `python bigdan.py --only <id>`（断点自动合并历史发现） |
+| 实时观察 Agent | `python dev/watch_run_logs.py` |
+| 调整时间预算 | `--job-timeout 5400`（默认每目标 60 分钟，每段 30 分钟） |
+| 停止/取消队列 | 控制台任务卡片「停止」/「取消」/「清空排队」 |
+| 查看报告 | `runtime/outputs/report-*.md` 或控制台历史页 |
+
+## 项目结构
+
+```
+bigdan.py            主调度器：目标解析 → 阶段判定 → 写任务简报 → 分段执行 → 汇总报告
+core/                核心模块
+  agent_exec.py        pi 会话执行器（限流重试/超时强杀/日志镜像/失败归档）
+  linkage.py           值池联动引擎（A 接口响应值 → B 接口输入，自动生成测试矩阵）
+  retry_detector.py    投降检测（Agent 过早放弃时强制注入换角度指令）
+  report.py            报告生成 + triage 硬门（CONFIRMED 不过检查自动降级）
+prompts/             常驻提示词：system.md（铁律/纪律/协议）+ methodology.md（阶段门控+操作手册）
+knowledge/           知识层（全部 Markdown，改文件即改行为）
+  agents/              阶段角色卡 ×7（该阶段你是谁、交付什么）
+  skills/              操作手册 ×21（xs_auth 登录审计 / ai_chat_xss / js_analysis …）
+  references/          字典速查 ×27（决策树 / WAF 签名 / 敏感信息模式库 / 合规 TIER …）
+webui/               FastAPI 控制台（任务队列 / 配置 / 历史报告）
+tools/               Agent 可调用工具（xsreq / xsenum / browser_probe / 字典分级 / 外部二进制）
+dev/                 本地靶场 + 实时日志观察
+docs/                USAGE.md（操作规范）+ ARCHITECTURE.md（架构与全目录详解）
+runtime/             运行产物（自动生成，gitignore；jobs/ 是断点，续打前勿删）
+```
+
+完整版（每个文件的职责注释、机制与代码位置对照）见 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**。
+
+## 知识层：让能力随实战增长
+
+Agent 的判断力来自 `knowledge/` 的 Markdown 文件，全部**按需加载**（每段只读命中的 2-3 个，防止上下文膨胀）：
+
+- **遇到新攻击手法** → 在 `skills/` 加操作手册（参考 `skills/xs_auth/SKILL.md` 的结构：识别信号 → 阶段步骤 → 测试清单 → 合规红线）
+- **发现漏抓的敏感信息格式** → 在 `references/js-extraction-regexes.md` 加一行 grep 模式
+- **某类参数怎么测** → `references/decision-trees/` 加一棵决策树
+- 最后在 `prompts/methodology.md` §13 的读取表登记触发条件——下个目标自动生效
 
 ## 安全边界与免责声明
 
-**本工具仅限在获得明确书面授权的目标上使用。**
+**本工具仅限在获得明确授权的目标上使用。**
 
-- 只测 `targets.txt` 白名单内的目标；禁止 DoS / 爆破 / 破坏性操作。
-- 使用者须确保对目标拥有明确授权；未经授权的渗透测试是违法行为，与项目作者无关。
-- 发现漏洞后请遵守目标平台的 SRC 披露规则，敏感数据只用于证明漏洞存在，不得外传或滥用。
-- 本项目不构成任何攻击指导；因使用本项目产生的任何后果由使用者自行承担。
+- 只测试 `targets.txt` 白名单内的目标；禁止 DoS / 批量爆破 / 破坏性操作
+- 内置合规约束：越权验证 ≤5 条数据、弱口令仅固定组合且限速、危险工具不默认启用、操作分级（TIER 1/2/3）
+- 敏感文件（`.env` 密钥、`credentials.txt` 账号、`targets.txt` 在测目标）均不入库，模板见对应 `.example` 文件
+- 使用者须确保对目标拥有合法授权；因使用本项目产生的任何后果由使用者自行承担
