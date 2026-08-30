@@ -35,9 +35,11 @@ command -v pi || { echo "!! pi 安装失败,把本行之前输出发给助手排
 
 say "5/8 ffuf Linux 版"
 if [ ! -x tools/bin/ffuf ]; then
-  (curl -fsSL https://github.com/ffuf/ffuf/releases/download/v2.1.0/ffuf_2.1.0_linux_amd64.tar.gz | tar xz -C tools/bin ffuf) \
-    || (curl -fsSL "https://ghproxy.cn/https://github.com/ffuf/ffuf/releases/download/v2.1.0/ffuf_2.1.0_linux_amd64.tar.gz" | tar xz -C tools/bin ffuf)
-  chmod +x tools/bin/ffuf
+  # 国内镜像优先,60s 超时防悬挂(腾讯云直连 GitHub 常年卡死)
+  (curl -fsSL -m 60 "https://ghproxy.cn/https://github.com/ffuf/ffuf/releases/download/v2.1.0/ffuf_2.1.0_linux_amd64.tar.gz" | tar xz -C tools/bin ffuf) \
+    || (curl -fsSL -m 60 https://github.com/ffuf/ffuf/releases/download/v2.1.0/ffuf_2.1.0_linux_amd64.tar.gz | tar xz -C tools/bin ffuf) \
+    || echo "!! ffuf 下载失败(非必需,可跳过,任务照跑)"
+  chmod +x tools/bin/ffuf 2>/dev/null || true
 fi
 
 say "6/8 swap 2G(内存保险)"
