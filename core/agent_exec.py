@@ -256,12 +256,14 @@ def which_pi(pi_bin: str = "pi") -> str:
 
 
 def _models_base_hint() -> str:
-    for path in (
+    candidates = (
         Path(os.environ.get("PI_CODING_AGENT_DIR") or "") / "models.json",
-        Path("/root/.pi/agent/models.json"),
+        Path("/root/.pi/agent/models.json"),  # 非 root 运行时无权进入 /root,探测必须容错
         Path.home() / ".pi" / "agent" / "models.json",
-    ):
-        if not path.is_file():
+    )
+    for path in candidates:
+        # os.path.isfile 对 EACCES 返回 False;pathlib.is_file 在 py3.8 会抛 PermissionError
+        if not os.path.isfile(path):
             continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
