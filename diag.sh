@@ -29,3 +29,7 @@ free -h | head -2
 df -h / | tail -1
 echo
 echo "===== 诊断结束: 把以上全部输出发给 AI ====="
+echo "===== 7/6 调度器 stdout 末尾(最新任务,真实路径 .webui) ====="
+if [ -n "$JOB" ]; then
+  tail -15 "$HOME/xs-bigdan/runtime/.webui/bigdan-$JOB.out.log" 2>/dev/null || echo "(无调度器日志)"
+fi

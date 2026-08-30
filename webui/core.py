@@ -117,13 +117,27 @@ def save_procs(procs: dict) -> None:
 
 
 def pid_alive(pid: int) -> bool:
+    """进程存活探测。Windows 用 tasklist；POSIX 用 signal 0 存在性探测——
+    此函数是队列串行性的根基,坏一个平台就会误判 running=中断/双跑任务。"""
+    if not pid or pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            out = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                capture_output=True, timeout=15,
+            ).stdout.decode("gbk", errors="replace")
+            return str(pid) in out
+        except Exception:  # noqa: BLE001
+            return False
     try:
-        out = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-            capture_output=True, timeout=15,
-        ).stdout.decode("gbk", errors="replace")
-        return str(pid) in out
-    except Exception:  # noqa: BLE001
+        os.kill(pid, 0)  # 信号 0 = 只探存在性,不投递
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # 进程存在,只是属主不是当前用户
+    except OSError:
         return False
 
 
