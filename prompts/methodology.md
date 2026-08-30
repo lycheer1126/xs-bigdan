@@ -206,6 +206,7 @@
 | knowledge/skills/ai_security/SKILL.md | 目标是 AI/LLM 应用 |
 | knowledge/skills/ai_chat_xss/SKILL.md | AI 对话/聊天类目标(前端 XSS 升级链: self-XSS→存储型→IPC 接管,同构通杀) |
 | knowledge/skills/xs_auth/SKILL.md | 存在登录口/认证逻辑审计需求(账号池注入后优先读:JS审计→定向验证→接管链,含 OAuth/找回密码白名单) |
+| knowledge/skills/business_flow/SKILL.md | BRIEF 注入账号/Cookie 后的登录态业务面(四问框架/寻路四式/返回包地图/XSS冷门落点/钱权益状态机) |
 
 **References(查证资料,特征命中即读):**
 | 文件 | 何时读 |
@@ -224,15 +225,16 @@
 | knowledge/references/cloud-attack-surface.md | OSS/S3/COS URL 命中(AK/SK 利用链) |
 | knowledge/references/miniprogram-analysis.md | 目标有小程序 |
 | knowledge/references/report_templates.md | Phase 5 报告模板 |
-| knowledge/references/bypass-techniques.md | LAST RESORT(仅高价值被 WAF 挡时) |
+| knowledge/references/bypass_techniques.md | LAST RESORT(仅高价值被 WAF 挡时) |
 | knowledge/references/bug_classes.md | Phase 5 十大漏洞类 |
 | knowledge/references/hunt_methodology.md | 完整方法论兜底 |
 | knowledge/references/api-fuzz-payloads.md | Fuzz payload 模板 |
+| knowledge/references/biz-mutations.md | 登录态业务参数扰动字典(七族:状态翻转/类型替换/数量边界/置空删除/结构注入/身份替换/编码探针,命中即停) |
 | knowledge/references/api-testing-methodology.md | API 测试方法论 |
 | knowledge/references/403-bypass-complete.md | 403 绕过全集 |
 | knowledge/references/crypto-analysis.md / jwt-analysis.md | 加密/JWT 分析 |
 | knowledge/references/js-analysis-source-leak.md / js-analysis-vulnforge.md | JS 分析补充 |
-| knowledge/references/ai-security-*.md | 目标 AI/LLM 时 |
+| knowledge/references/ai-security-testing.md 与 ai-security-vulnforge.md | 目标 AI/LLM 时 |
 | knowledge/references/cloud-attack-surface.md | 云资产命中 |
 
 **Agents(阶段视角,段首可选注入):**
