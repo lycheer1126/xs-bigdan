@@ -32,3 +32,4 @@ targets.txt
 # 实战战果台账与案例(含目标关联信息,不入公开仓库)
 knowledge/experience/
 jobs/
+tools/wordlists/fuzzDicts/
