@@ -2,9 +2,21 @@
 
 **本地 SRC 授权渗透测试流水线**：你提供授权目标，AI Agent 按阶段方法论自动完成黑盒测试并产出带证据的 Markdown 报告；确定性调度器负责时间控制、质量闸门和状态管理，人只做三件事——**给授权、给测试账号、复核报告**。
 
-> 📖 操作规范见 [docs/USAGE.md](docs/USAGE.md) · 架构与全目录详解见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+> 📖 操作规范见 [docs/USAGE.md](docs/USAGE.md) · 架构与全目录详解见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · **VPS 夜跑部署见 [docs/DEPLOY.md](docs/DEPLOY.md)**
 >
 > ⚠️ **仅限明确授权的目标**（SRC 收录 / 书面委托）。未授权渗透测试违法，后果自负。
+
+---
+
+## 设计构思：薄 Harness + 通用 Agent + 外挂知识层
+
+这个项目的核心判断是：**LLM 本身就是能力，Harness 只配干确定性的三件事——装配、门控、收尾**。据此有五条设计公理：
+
+1. **薄 Harness**：调度器 `bigdan.py` 不写死任何测试逻辑，只负责五件事——阶段状态机（落盘产物门控）、上下文切片（每段全新会话防模型劣化）、停止信号（BLOCKED 求助 / 建议结束 / 预算尽三通道）、装配（BRIEF 注入角色卡+知识索引+账号+Cookie+用户意图）、收尾（triage 硬门+报告）。测试思路全部住在 `knowledge/` 与 `prompts/` 的 Markdown 里——**改文件即改行为**。
+2. **通用 Agent 循环**：执行层直接用 [pi-coding-agent](https://github.com/badlogic/pi-mono)，不造多角色 Subagent、不封 MCP 工具集；模型自己组合 xsreq / ffuf / browser_probe 完成测试。Harness 的唯一立场是合规与止损，不是教模型怎么渗透。
+3. **知识外挂 + 实战飞轮**：知识全部按需加载（每段只读命中的 2-3 个文件，防上下文泛滥）；真实战报持续消化进 skills/references/台账——113 条个人实战动作碎片已蒸馏为 `business_flow` 四问框架与七族扰动字典，Agent 越用越强。
+4. **双通道记忆**：段间状态靠"digest 交接文档（叙事）+ pi 会话 jsonl（兜底恢复）"双通道传递，stdout 捕获丢失也不会丢交接——调度器绝不因停止信号丢失而空烧预算。
+5. **合规内建**：Safe-First 门控次序、操作 TIER 分级、triage 硬门、登录限速红线都在 Harness 层强制，不依赖模型自觉。
 
 ---
 
@@ -38,6 +50,9 @@
 | **误报硬门** | 报告生成时对每条 CONFIRMED 做机械检查（有 URL/有类型/有证据/有影响描述），不过自动降级并标注原因 |
 | **知识可积累** | 方法论/决策树/敏感信息模式库全部是 Markdown，实战学到什么就往里加什么，下个目标自动生效 |
 | **无人值守韧性** | LLM 限流自动重试（带预算）、超时强杀、失败原因写进报告、断点续打不丢发现、误操作中断不留孤儿进程 |
+| **登录态业务遍历** | 建任务时贴 Cookie（多账号框，自动按站点隔离）与"我的想法"——`business_flow` 四问框架 + 七族参数扰动字典 + 返回包地图，复现人类工程师的功能点遍历打法 |
+| **ffuf 爆破范式** | 场景字典库 fuzzDicts（18 类 124 册）+ 404 基线过滤 + 特殊场景自建临时字典；定位为 JS 分析后的补充面，Safe-First 次序不变 |
+| **VPS 夜跑形态** | systemd 托管 + 串行队列 + 停止信号止损，睡前入队早上收报告；Windows 与 Linux 双平台同一套代码 |
 
 ## 快速开始
 
@@ -89,13 +104,14 @@ core/                核心模块
 prompts/             常驻提示词：system.md（铁律/纪律/协议）+ methodology.md（阶段门控+操作手册）
 knowledge/           知识层（全部 Markdown，改文件即改行为）
   agents/              阶段角色卡 ×7（该阶段你是谁、交付什么）
-  skills/              操作手册 ×21（xs_auth 登录审计 / ai_chat_xss / js_analysis …）
-  references/          字典速查 ×27（决策树 / WAF 签名 / 敏感信息模式库 / 合规 TIER …）
-webui/               FastAPI 控制台（任务队列 / 配置 / 历史报告）
-tools/               Agent 可调用工具（xsreq / xsenum / browser_probe / 字典分级 / 外部二进制）
+  skills/              操作手册 ×22（business_flow 业务遍历 / xs_auth 登录审计 / ai_chat_xss / js_analysis …）
+  references/          字典速查 ×27（决策树 / WAF 签名 / biz-mutations 扰动字典 / 合规 TIER …）
+webui/               FastAPI 控制台（任务队列 / 配置 / 历史报告；建任务支持 Cookie 多账号框+用户意图）
+tools/               Agent 可调用工具（xsreq / xsenum / browser_probe / ffuf / 字典：seclists 分级 + fuzzDicts 场景库）
 dev/                 本地靶场 + 实时日志观察
-docs/                USAGE.md（操作规范）+ ARCHITECTURE.md（架构与全目录详解）
-runtime/             运行产物（自动生成，gitignore；jobs/ 是断点，续打前勿删）
+docs/                USAGE.md（操作规范）+ ARCHITECTURE.md（架构）+ DEPLOY.md（VPS 夜跑部署）
+deploy_vps.sh        服务器一键部署脚本（配合 tar 包上传）
+runtime/             运行产物（自动生成，gitignore；runtime/jobs/ 是断点续打现场，runtime/jobs-legacy/ 是历史归档）
 ```
 
 完整版（每个文件的职责注释、机制与代码位置对照）见 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**。
