@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import List
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -35,7 +37,8 @@ class LlmProfileItem(BaseModel):
 
 class LlmProfilesReq(BaseModel):
     active: str = ""
-    profiles: list[LlmProfileItem] = []
+    # typing.List 而非 list[]：服务器 Python 3.8 下 pydantic 求值注解会炸
+    profiles: List[LlmProfileItem] = []
 
 
 @router.get("")
