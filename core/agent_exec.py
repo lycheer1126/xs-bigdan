@@ -507,7 +507,8 @@ def _run_pi_session_once(
     # Prefer line-buffered node when piped
     env["NODE_OPTIONS"] = (env.get("NODE_OPTIONS") or "") + " --trace-uncaught"
     env.setdefault("FORCE_COLOR", "0")
-    tools = Path("/app/tools/bin")
+    # 项目 tools/bin 注入 PATH:agent 可直接 `ffuf -u ...`(不写死 /app,随项目位置解析)
+    tools = Path(__file__).resolve().parents[1] / "tools" / "bin"
     if tools.is_dir():
         env["PATH"] = f"{tools}{os.pathsep}{env.get('PATH', '')}"
     try:
