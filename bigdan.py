@@ -494,7 +494,7 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
         f"- 场景字典库: `{(tools_dir / 'wordlists' / 'fuzzDicts').as_posix()}` —— 18 类 124 册按场景选用: "
         f"directoryDicts(目录)/apiDict(接口)/paramDict(参数)/sqlDict/xssPayload/easyXssPayload/"
         f"ssrfDicts/uploadFileExtDicts(上传后缀)/subdomainDicts(子域)/routerDicts(路由)/spring/passwordDict 等\n"
-        f"- ffuf(目录/接口爆破主力): `{ffuf_bin}` —— 先抓 404 基线再过滤差异: "
+        f"- ffuf(目录/接口爆破执行器,JS 分析后的补充面,不作开局动作): `{ffuf_bin}` —— 先抓 404 基线再过滤差异: "
         f"`ffuf -u <url>/FUZZ -w <字典> -mc all -fc 404 -fs <基线长度> -t 6 -r -timeout 8`; "
         f"特殊场景(业务词/厂商词/前端路由)自建临时字典写入本段工作目录再 `-w` 喂入;WAF/SAFE MODE 时 `-t 1` 且禁深扫档\n"
         f"{probe_extra}"

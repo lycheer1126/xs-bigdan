@@ -59,11 +59,13 @@
   WAF 存在 → SAFE MODE 限流,未知栈 + WAF 一律不探 admin。
 - **字典分级**(BRIEF 工具节有完整路径):paths(轻探,默认) → quickhits(标准) → common(全量) → raft-small(深扫)。
   无 WAF 才允许逐级加深;深扫前先确认轻探档有异常信号,禁止一上来就 raft。
-- **ffuf 范式(目录/接口爆破主力,开局一个域名先爆它)**:先取 404 基线(状态码+长度),
+- **ffuf 范式(目录/接口爆破的执行器,补充面而非开局动作)**:**相位次序不变**——recon 仍以
+  指纹/WAF 确认 → JS 分析(§2 优先产出契约)为先,ffuf 在 JS 分析落盘后或 linkage 阶段
+  需要枚举特定命名空间时启用;先取 404 基线(状态码+长度),
   `ffuf -u <url>/FUZZ -w <字典> -mc all -fc 404 -fs <基线长度> -t 6 -r -timeout 8`;
   字典优先级: fuzzDicts 场景字典(BRIEF 工具节有路径,directoryDicts/apiDict/paramDict/routerDicts 按目标形态选)
   → seclists 分级;**特殊场景(业务名词/厂商词/前端路由名)自建临时字典**写入本段工作目录再 `-w` 喂入——
-  通用字典命不中的业务路径靠自建字典补,参数名爆破同理用 paramDict;
+  JS 里提取到的端点是最高信噪比来源,ffuf 补的是 JS 没露出来的暗面;
   WAF/SAFE MODE 时 `-t 1` 并禁深扫档,发现限流立即降速或停手。
 - 本机装了 EHole(`tools/bin/ehole.exe finger -u <url>`)时可用其指纹库辅助识别——**仅用指纹模式,
   禁用其漏洞扫描模块**(自动化漏扫违反 TIER 合规);未安装不等待,响应头指纹已够。
