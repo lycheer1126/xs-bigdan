@@ -30,7 +30,7 @@ if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -c2- | cut -d. -f1)" 
   sudo apt install -y nodejs
 fi
 npm config set registry https://registry.npmmirror.com
-sudo npm install -g @earendil-works/pi-coding-agent
+sudo npm install -g @earendil-works/pi-coding-agent@0.84.1
 command -v pi || { echo "!! pi 安装失败,把本行之前输出发给助手排查"; exit 1; }
 
 say "5/8 ffuf Linux 版"
