@@ -182,6 +182,21 @@ XSModules.tasks = (() => {
           <label>备注（可选，应用于本批所有目标）</label>
           <input id="nf-note" placeholder="如: 某SRC已授权资产" autocomplete="off">
         </div>
+        <div class="field">
+          <label>Cookie（可选，每个框一个账号的登录态，应用于本批所有目标并自动按站点隔离）
+            <button type="button" id="nf-cookie-add" class="btn" title="再加一个账号"
+              style="margin-left:8px;padding:0 10px;font-size:14px;line-height:1.4">＋</button>
+          </label>
+          <div id="nf-cookie-list"></div>
+          <div class="muted" style="font-size:11.5px;margin-top:4px">从浏览器 F12 → 网络 → 请求标头复制整串 Cookie 粘贴。
+            多账号 = agent 自动做两账号差分越权(IDOR)测试；SSO/扫码登录站点只能走此通道。</div>
+        </div>
+        <div class="field">
+          <label>我的想法（可选，自由填写：为什么测它 / 哪里薄弱 / 想先看什么 —— 原文注入 BRIEF，agent 优先验证）</label>
+          <textarea id="nf-intent" spellcheck="false" autocomplete="off"
+            style="width:100%;min-height:44px"
+            placeholder="如: 这个 AI 聊天页登录即可用，怀疑会话对象越权与提示词注入；重点测会话归属和存储型 XSS 落点"></textarea>
+        </div>
         <div class="field-row">
           <div class="field">
             <label>每目标总预算（秒，默认 3600=60min）</label>
@@ -201,6 +216,34 @@ XSModules.tasks = (() => {
       </div>`);
     const mask = document.getElementById("modal-mask");
     mask.querySelector("#nf-cancel").addEventListener("click", () => mask.hidden = true);
+    // Cookie 多账号框：＋ 加框 / ✕ 删框；提交时把所有框拼回"每行一个账号"（后端格式不变）
+    const cookieList = mask.querySelector("#nf-cookie-list");
+    const addCookieRow = () => {
+      const rows = cookieList.querySelectorAll(".nf-cookie-row");
+      if (rows.length >= 5) { XS.toast("最多 5 个账号框", "error"); return; }
+      const row = document.createElement("div");
+      row.className = "nf-cookie-row";
+      row.style.cssText = "display:flex;gap:6px;margin-top:6px;align-items:flex-start";
+      const ta = document.createElement("textarea");
+      ta.className = "nf-cookie-input";
+      ta.spellcheck = false; ta.autocomplete = "off";
+      ta.placeholder = `账号 ${rows.length + 1} 的 Cookie，如 __Secure-next-auth.session-token=xxx; SUB=xxx`;
+      ta.style.cssText = "width:100%;min-height:38px;font-family:var(--mono);font-size:12px";
+      const del = document.createElement("button");
+      del.type = "button"; del.textContent = "✕"; del.className = "btn";
+      del.title = "删除此账号";
+      del.style.cssText = "flex:0 0 auto;padding:0 9px;";
+      del.addEventListener("click", () => { row.remove(); refreshPlaceholders(); });
+      row.append(ta, del);
+      cookieList.appendChild(row);
+    };
+    const refreshPlaceholders = () => {
+      cookieList.querySelectorAll(".nf-cookie-input").forEach((ta, i) => {
+        ta.placeholder = `账号 ${i + 1} 的 Cookie，如 __Secure-next-auth.session-token=xxx; SUB=xxx`;
+      });
+    };
+    mask.querySelector("#nf-cookie-add").addEventListener("click", addCookieRow);
+    addCookieRow();
     mask.querySelector("#nf-ok").addEventListener("click", async () => {
       const text = mask.querySelector("#nf-url").value.trim();
       if (!text) { XS.toast("请输入目标 URL（每行一个）", "error"); return; }
@@ -212,6 +255,9 @@ XSModules.tasks = (() => {
           json: {
             urls_text: text,
             note: mask.querySelector("#nf-note").value.trim(),
+            cookie: [...cookieList.querySelectorAll(".nf-cookie-input")]
+              .map(t => t.value.trim()).filter(Boolean).join("\n"),
+            intent: mask.querySelector("#nf-intent").value.trim(),
             job_timeout: +mask.querySelector("#nf-timeout").value || 3600,
             segments: +mask.querySelector("#nf-segs").value || 3,
           },

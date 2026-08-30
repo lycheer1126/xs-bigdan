@@ -77,8 +77,12 @@ def tail_text(path: Path, n_lines: int = 200) -> str:
 
 
 def to_recycle_bin(path: Path) -> bool:
-    """Windows 回收站删除；失败时返回 False（调用方决定是否报告）。"""
+    """删除任务目录：Windows 进回收站；POSIX 无回收站语义直接 rmtree（调用方已二次确认）。"""
     try:
+        if os.name != "nt":
+            import shutil as _sh
+            _sh.rmtree(path, ignore_errors=True)
+            return not path.exists()
         p = str(path).replace("'", "''")
         cmd = (
             "Add-Type -AssemblyName Microsoft.VisualBasic; "
@@ -174,16 +178,59 @@ def spawn_bigdan(args: list[str], job_id: str) -> dict:
     return rec
 
 
+def _kill_tree_windows(pid: int) -> None:
+    subprocess.run(
+        ["taskkill", "/PID", str(pid), "/T", "/F"],
+        capture_output=True, timeout=30,
+    )
+
+
+def _kill_tree_posix(pid: int) -> None:
+    """杀进程树：bigdan 是孤儿进程（launcher 已退出），/proc 走 PPID 收集整棵子树。
+
+    先杀叶子（node pi 及其 chromium），最后杀根，避免根死后子进程被 init 收养漏杀。
+    """
+    import time as _t
+    tree: dict[int, list[int]] = {}
+    for ent in Path("/proc").iterdir():
+        if not ent.name.isdigit():
+            continue
+        try:
+            stat = (ent / "stat").read_text(encoding="utf-8", errors="replace")
+            ppid = int(stat.rsplit(")", 1)[1].split()[1])
+            tree.setdefault(ppid, []).append(int(ent.name))
+        except (OSError, ValueError, IndexError):
+            continue
+    order: list[int] = []
+    stack = [pid]
+    seen = set()
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        order.append(cur)
+        stack.extend(tree.get(cur, []))
+    import signal
+    for p in reversed(order):  # 叶子→根
+        try:
+            os.kill(p, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    _t.sleep(0.3)
+
+
 def stop_job(job_id: str) -> bool:
-    """终止任务进程树（taskkill /T 连带 pi node 子进程）。"""
+    """终止任务进程树（Windows taskkill /T；POSIX 走 /proc 子树 SIGKILL，
+    连带 pi node 与其 chromium 子进程——打目标的进程绝不能留孤儿）。"""
     rec = running_pids().get(job_id)
     if not rec:
         return False
     try:
-        subprocess.run(
-            ["taskkill", "/PID", str(rec["pid"]), "/T", "/F"],
-            capture_output=True, timeout=30,
-        )
+        if os.name == "nt":
+            _kill_tree_windows(int(rec["pid"]))
+        else:
+            _kill_tree_posix(int(rec["pid"]))
     except Exception:  # noqa: BLE001
         pass
     procs = load_procs()
@@ -305,8 +352,36 @@ def _queue_tick() -> dict:
     return {"started": started}
 
 
+def _write_job_auth(job_dir: Path, host: str, cookie: str, intent: str, scope_by_host: bool) -> None:
+    """建任务时落盘人工提供的登录态与意图。
+
+    cookies.txt 每行 `[host|]cookie`：scope_by_host=True 时为无前缀行自动加 host
+    （批量多目标防 cookie 串站泄露）；凭证只进 job 目录（gitignored），不进
+    queue.json / targets.txt。
+    """
+    ck_lines = []
+    for raw in (cookie or "").splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        head, sep, rest = s.partition("|")
+        scope = head.lower().split(":")[0]  # 容忍用户自带 host:port 前缀
+        if (sep and "=" not in head
+                and re.fullmatch(r"[A-Za-z0-9.\-]+", head or "")
+                and ("." in scope or scope == "localhost")):
+            ck_lines.append(s)  # 用户自带 host 前缀，原样保留（bigdan 端按 host 过滤）
+        elif scope_by_host:
+            ck_lines.append(f"{host}|{s}")
+        else:
+            ck_lines.append(s)
+    if ck_lines:
+        (job_dir / "cookies.txt").write_text("\n".join(ck_lines) + "\n", encoding="utf-8")
+    if (intent or "").strip():
+        (job_dir / "intent.md").write_text(intent.strip() + "\n", encoding="utf-8")
+
+
 def enqueue_tasks(urls_text: str, note: str = "", job_timeout: int = DEFAULT_JOB_TIMEOUT,
-                  segments: int = DEFAULT_SEGMENTS) -> dict:
+                  segments: int = DEFAULT_SEGMENTS, cookie: str = "", intent: str = "") -> dict:
     """批量新建任务：每行一个 URL 自动生成 id，按粘贴顺序入队，串行执行（绝不并行）。"""
     lines = parse_batch_lines(urls_text)
     if not lines:
@@ -318,8 +393,11 @@ def enqueue_tasks(urls_text: str, note: str = "", job_timeout: int = DEFAULT_JOB
         for i, (url, n) in enumerate(lines):
             job_id = _gen_job_id(url, seq=i)
             upsert_target_line(job_id, url, (n or note).strip())
-            (JOBS_DIR / job_id).mkdir(parents=True, exist_ok=True)
-            (JOBS_DIR / job_id / "evidence").mkdir(parents=True, exist_ok=True)
+            jd = JOBS_DIR / job_id
+            jd.mkdir(parents=True, exist_ok=True)
+            (jd / "evidence").mkdir(parents=True, exist_ok=True)
+            host = re.sub(r"^https?://", "", url, flags=re.I).split("/")[0].split(":")[0].lower()
+            _write_job_auth(jd, host, cookie, intent, scope_by_host=True)
             q.append({"id": job_id, "url": url, "note": (n or note).strip(),
                       "state": "queued", "src": "batch",
                       "job_timeout": max(90, int(job_timeout)),
@@ -412,7 +490,7 @@ def remove_target_line(job_id: str) -> None:
 
 
 def start_task(url: str, note: str = "", job_timeout: int = DEFAULT_JOB_TIMEOUT,
-               segments: int = DEFAULT_SEGMENTS) -> dict:
+               segments: int = DEFAULT_SEGMENTS, cookie: str = "", intent: str = "") -> dict:
     """新建任务：登记 targets.txt；空闲立即启动，繁忙自动入队（串行，绝不并行）。"""
     url = url.strip()
     if not re.match(r"^https?://", url, re.I):
@@ -426,6 +504,7 @@ def start_task(url: str, note: str = "", job_timeout: int = DEFAULT_JOB_TIMEOUT,
     # 否则创建后立刻点详情会 404「任务不存在」（bigdan.py 的 mkdir 幂等）。
     (JOBS_DIR / job_id).mkdir(parents=True, exist_ok=True)
     (JOBS_DIR / job_id / "evidence").mkdir(parents=True, exist_ok=True)
+    _write_job_auth(JOBS_DIR / job_id, host.lower(), cookie, intent, scope_by_host=False)
     entry = {"id": job_id, "url": url, "note": note.strip(), "src": "single",
              "job_timeout": max(90, int(job_timeout)), "segments": max(1, int(segments))}
     with _queue_lock:
@@ -550,11 +629,17 @@ def list_jobs() -> list[dict]:
                         if s.get("exit_code") is not None and s.get("exit_code") not in (0, 124, 127)]
             last_error = next((s.get("last_error") for s in reversed(err_segs)
                                if s.get("last_error")), "")
+            url = (summary or {}).get("url", "")
+            note = (summary or {}).get("note", "")
+            if not url or not note:  # 中断/排队任务无 summary → BRIEF.md 回退
+                bu, bn = _brief_meta(d)
+                url = url or bu
+                note = note or bn
             jobs.append({
                 "id": d.name,
                 "state": state,
-                "url": (summary or {}).get("url", ""),
-                "note": (summary or {}).get("note", ""),
+                "url": url,
+                "note": note,
                 "started_at": (summary or {}).get("started_at", ""),
                 "ended_at": (summary or {}).get("ended_at", ""),
                 "elapsed_sec": (summary or {}).get("elapsed_sec"),
@@ -587,6 +672,27 @@ def list_jobs() -> list[dict]:
         "queued": sum(1 for j in jobs if j["state"] == "queued"),
     }
     return {"stats": stats, "jobs": jobs}
+
+
+def _brief_meta(job_dir: Path) -> tuple[str, str]:
+    """从 BRIEF.md 回退读 目标URL/备注。
+
+    summary.json 只在 run_target 跑完时才落盘，中断/排队任务没有——
+    卡片上 url/note 会空白；而 BRIEF.md 在任务创建时就写入且每段重写
+    时这两行不变，适合做回退源。
+    """
+    bf = job_dir / "BRIEF.md"
+    if not bf.is_file():
+        return "", ""
+    try:
+        text = bf.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "", ""
+    mu = re.search(r"(?m)^-\s*目标\s*URL:\s*`?([^`\n]+?)`?\s*$", text)
+    mn = re.search(r"(?m)^-\s*备注:\s*(.*)$", text)
+    url = mu.group(1).strip() if mu else ""
+    note = mn.group(1).strip() if mn else ""
+    return url, note
 
 
 def _last_phase(job_dir: Path) -> str | None:

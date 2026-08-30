@@ -49,6 +49,23 @@ def _pick_keys(d: dict) -> list:
     return sorted(str(k) for k in (d or {}).keys())
 
 
+def _cookie_to_playwright(cookie: str, url: str) -> list:
+    """'k=v; k2=v2' → playwright add_cookies 形参（按目标 url 定域）。"""
+    from urllib.parse import urlparse
+    u = urlparse(url)
+    base = f"{u.scheme or 'https'}://{u.netloc}"
+    out = []
+    for part in (cookie or "").split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        k, _, v = part.partition("=")
+        k, v = k.strip(), v.strip()
+        if k:
+            out.append({"name": k, "value": v, "url": base})
+    return out
+
+
 def _run(sub: str, args) -> int:
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
@@ -58,6 +75,9 @@ def _run(sub: str, args) -> int:
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36",
             viewport={"width": 1440, "height": 900},
         )
+        cookies = _cookie_to_playwright(getattr(args, "cookie", ""), args.url)
+        if cookies:
+            ctx.add_cookies(cookies)
         page = ctx.new_page()
 
         console_msgs: list = []
@@ -286,6 +306,7 @@ def main() -> int:
             sp.add_argument("user")
             sp.add_argument("passwd")
         sp.add_argument("--wait", type=float, default=2, help="加载后额外等待秒数")
+        sp.add_argument("--cookie", default="", help="登录态 Cookie 'k=v; k2=v2'，注入后以该身份浏览")
         sp.add_argument("--console", type=int, default=20, help="console 显示条数")
         sp.add_argument("--xhr", type=int, default=30, help="xhr 显示条数")
         sp.add_argument("--save", help="chunks 保存目录")

@@ -25,6 +25,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlsplit
 
 from core.agent_exec import run_pi_session, extract_last_error
 from core.retry_detector import detect_surrender, build_retry_prompt
@@ -223,11 +224,13 @@ PHASE_READ_INDEX = {
         ("references/response-chaining.md", "响应链方法论:A 返回值→B 输入"),
         ("references/decision-trees/README.md", "参数特征命中→先读索引再精读对应§决策树小文件(29棵,防上下文泛滥)"),
         ("skills/xs_auth/SKILL.md", "BRIEF 注入了测试账号时:登录口逻辑审计手册(JS审计→定向验证→接管链)"),
+        ("skills/business_flow/SKILL.md", "BRIEF 注入了账号/Cookie 时:登录态功能点遍历(四问框架+寻路四式+返回包地图)"),
     ],
     "deep": [  # 🟡 条件阶段: JWT/加密/端点榨干（无 JWT 且无加密体→跳过并写 digest）
         ("skills/jwt_attack/SKILL.md", "发现 JWT 时:全攻击链(alg:none/弱密钥/kid/RS256→HS256)"),
         ("skills/crypto_attack/SKILL.md", "发现前端加密时:密钥提取→批量解密→明文回注值池"),
         ("references/discovery-amplification.md", "Discovery Amplification:端点→同类路径/参数榨干"),
+        ("references/biz-mutations.md", "登录态业务参数扰动字典:七族扰动/命中即停(越权/状态机/载体探针)"),
     ],
     "highrisk": [  # 🔴 条件阶段: 已有 ≥1 CONFIRMED 才进；WAF 存在全程 SAFE MODE
         ("agents/exploit/SKILL.md", "利用专家视角:FOUND≠CONFIRMED 三级分类"),
@@ -394,6 +397,69 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
             + "\n".join(cred_lines) + "\n"
         )
 
+    # 会话 Cookie（人工提供的登录态:SSO/扫码登录站点无法走密码登录，这是唯一通道。
+    # 每行 `[host|]cookie`；带 host 前缀的按目标 host 过滤，防 cookie 发到别的站点）
+    cookie_section = ""
+    cookie_file = job_dir / "cookies.txt"
+    if cookie_file.is_file():
+        host = urlsplit(target["url"]).netloc.split(":")[0].lower()
+        cookies: List[str] = []
+        try:
+            for raw in cookie_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                s = raw.strip()
+                if not s or s.startswith("#"):
+                    continue
+                head, sep, rest = s.partition("|")
+                scope = head.lower().split(":")[0]  # 容忍 host:port 前缀
+                if (sep and "=" not in head
+                        and re.fullmatch(r"[A-Za-z0-9.\-]+", head or "")
+                        and ("." in scope or scope == "localhost")):
+                    if scope != host and not host.endswith("." + scope):
+                        continue  # 其他站点的 cookie，绝不下发（防串站泄露）
+                    s = rest.strip()
+                cookies.append(s)
+        except OSError:
+            cookies = []
+        if cookies:
+            ck_lines = [f"- 账号{i}: `{ck}`" for i, ck in enumerate(cookies, 1)]
+            diff_hint = (
+                "\n**多账号差分是金标准**：用账号A的 Cookie 访问/操作账号B的资源对象"
+                "（遍历 ID/路由），能读能改即 IDOR。"
+                if len(cookies) > 1 else ""
+            )
+            cookie_section = (
+                "\n## 测试 Cookie（人工提供，登录态直接可用，无需再登录）\n"
+                "用法: API 层 `xsreq --header 'Cookie: <串>'`；"
+                "浏览器层 `browser_probe.py <子命令> <url> --cookie '<串>'`"
+                "（登录态页面渲染/存储型 XSS 落点验证/功能点遍历）。\n"
+                + "\n".join(ck_lines) + "\n" + diff_hint
+            )
+
+    # 用户意图（建任务时人工填写的原始想法:哪里薄弱/想先测什么——优先级最高的方向指引）
+    intent_section = ""
+    it_f = job_dir / "intent.md"
+    if it_f.is_file():
+        it = it_f.read_text(encoding="utf-8", errors="replace").strip()
+        if it:
+            intent_section = (
+                "\n## 用户意图（建任务时人工填写，优先验证）\n"
+                f"{it}\n"
+            )
+
+    # 入口聚焦（用户给带路径的 URL = 想先深测这个入口，而非整个 host 铺开；
+    # 不缩白名单——host 级授权不变，只是探索优先级跟随用户意图）
+    focus_section = ""
+    url_path = urlsplit(target["url"]).path.strip("/")
+    if url_path:
+        app_prefix = "/" + url_path.split("/")[0]
+        focus_section = (
+            f"\n## 入口聚焦（用户意图，优先级高于 host 内自由探索）\n"
+            f"用户指定入口 `{target['url']}`——往往是他判断的薄弱点。"
+            f"**先集中深测此入口及其应用前缀 `{app_prefix}/*`**；"
+            f"host 内其他应用/路径默认不要主动铺开（偏离用户意图且浪费预算），"
+            f"仅当该入口已榨干且有明确线索指向别处时才扩大，并在 digest 里说明理由。\n"
+        )
+
     brief.write_text(
         f"# 目标简报\n\n"
         f"- 目标 ID: `{target['id']}`\n"
@@ -402,13 +468,16 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
         f"- 本次授权范围（白名单）: {', '.join(scope)}\n"
         f"- 总段数: {segs} | 本段: 第 {seg_idx + 1} 段（段=上下文保鲜切片，与阶段无关）\n"
         f"- 本段阶段判定: **{phase}**（harness 按落盘产物推断: {basis}；"
-        f"你若依据 BRIEF/证据判断阶段不同，按你的判断推进并在 digest 里说明）\n\n"
+        f"你若依据 BRIEF/证据判断阶段不同，按你的判断推进并在 digest 里说明）\n"
+        f"{focus_section}\n"
         f"## 读取索引（本段建议读,按需 cat;别一次全读,防上下文泛滥）\n"
         f"{idx_lines}\n"
         f"\n"
         f"{linkage_section}"
         f"{user_input_section}"
+        f"{intent_section}"
         f"{cred_section}"
+        f"{cookie_section}"
         f"\n"
         f"## 工具（绝对路径，直接 `python <路径> ...` 调用，不要 which/find 找）\n"
         f"- 请求: `python {req} <url> [--method POST] [--data '...'] [--json '{{...}}'] [--header 'K: V'] [--save 文件名]`\n"
@@ -549,16 +618,61 @@ def load_digests(job_dir: Path) -> List[str]:
     return digests
 
 
+def read_final_assistant_text(job_dir: Path, min_mtime: float = 0.0) -> str:
+    """兜底通道：从最新 pi 会话镜像读最后一条非空 assistant 文本。
+
+    stdout 捕获丢失（管道/编码故障，如 Windows GBK tee error）时，agent 的
+    最终输出（FINDING/BLOCKED/RECON_DIGEST）会整段丢失，调度器错过停止信号
+    就会多烧后续段预算。pi 自己落盘的 jsonl 始终是 UTF-8，用它兜底恢复。
+
+    min_mtime: 只接受该时间点之后有写入的 jsonl——本段 pi 压根没启动时
+    （exit 127 等），最新 jsonl 是上一段的陈旧镜像，不设门槛会把旧交接
+    误记到本段。
+    """
+    sess = job_dir / ".pi-sessions"
+    if not sess.is_dir():
+        return ""
+    jsonls = sorted(sess.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    if not jsonls or jsonls[-1].stat().st_mtime < min_mtime:
+        return ""
+    last = ""
+    try:
+        with jsonls[-1].open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"assistant"' not in line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                msg = e.get("message") or e
+                if not isinstance(msg, dict) or msg.get("role") != "assistant":
+                    continue
+                c = msg.get("content")
+                if isinstance(c, list):
+                    c = "\n".join(
+                        b.get("text", "") for b in c if isinstance(b, dict)
+                    )
+                if isinstance(c, str) and c.strip():
+                    last = c
+    except OSError:
+        return ""
+    return last
+
+
 # ---------------------------------------------------------------- FINDING 提取
 
-FINDING_RE = re.compile(r"(?:^|\])\s*FINDING:\s*(.+)$", re.M)
+FINDING_RE = re.compile(r"(?:^|\])\s*`{0,2}\s*FINDING:\s*(.+?)`{0,2}\s*$", re.M)
 
 
 def extract_findings(log_text: str) -> List[dict]:
-    """提取 FINDING: type|title|file|status 行；type/title 为空的脏行丢弃（宁缺勿滥）。"""
+    """提取 FINDING: type|title|file|status 行；type/title 为空的脏行丢弃（宁缺勿滥）。
+
+    反引号容错：agent 常把整行包进 `` ` ``（行内代码），老版正则因此漏提取。
+    """
     out: List[dict] = []
     for m in FINDING_RE.finditer(log_text):
-        parts = [p.strip() for p in m.group(1).split("|")]
+        parts = [p.strip().strip("`").strip() for p in m.group(1).split("|")]
         f = {
             "type": parts[0] if len(parts) > 0 else "",
             "title": parts[1] if len(parts) > 1 else "",
@@ -711,6 +825,7 @@ def run_target(
         user_prompt = build_user_prompt(target, i, segs, seg_to)
         log_path = job_dir / f"session-{seg_no}.log"
         tag = target["id"]
+        seg_start_epoch = time.time()  # jsonl 兜底的陈旧镜像门槛基线
 
         runlog(job_dir, "segment_start", {"seg": seg_no, "budget_sec": seg_to, "phase": phase})
         log(f"=== [{tag}] 段 {seg_no}/{segs} 开始 {datetime.now().strftime('%H:%M:%S')} "
@@ -730,24 +845,32 @@ def run_target(
         )
         segs_ran += 1
         log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
+        # 兜底：从 pi 会话镜像恢复最终 assistant 输出（stdout 捕获丢失时救回
+        # FINDING/BLOCKED/RECON_DIGEST，否则调度器错过停止信号多烧整段预算）。
+        # min_mtime 防陈旧镜像：本段 pi 没启动成功时不该用上一段的交接
+        recover = read_final_assistant_text(job_dir, min_mtime=seg_start_epoch - 5)
 
         # 提取本段发现（按 类型|标题|证据 去重后合并，保留上一轮/前几段的历史发现）
         seg_findings = extract_findings(log_text)
+        for f in extract_findings(recover):
+            if f not in seg_findings:
+                seg_findings.append(f)
         for f in seg_findings:
             key = (f["type"], f["title"], f["file"])
             if all((x["type"], x["title"], x["file"]) != key for x in summary["findings"]):
                 summary["findings"].append(f)
             runlog(job_dir, "finding", {"seg": seg_no, "vuln_type": f["type"], "title": f["title"], "file": f["file"], "status": f.get("status", "CONFIRMED")})
 
-        # 提取 digest
-        digest = extract_digest(log_text)
+        # 提取 digest（stdout 没截到时用 jsonl 兜底恢复）
+        digest = extract_digest(log_text) or (extract_digest(recover) if recover else None)
         if digest:
             (job_dir / f"digest-{seg_no}.md").write_text(digest + "\n", encoding="utf-8")
             if "建议结束" in digest:
                 summary["early_stop"] = True
                 runlog(job_dir, "early_stop", {"seg": seg_no})
-        # 人工求助检测（BLOCKED 协议）：agent 请求人工输入 → 停止后续段等待线索
-        if BLOCKED_RE.search(digest or log_text[-4000:]):
+        # 人工求助检测（BLOCKED 协议）：agent 请求人工输入 → 停止后续段等待线索。
+        # digest 只截 RECON_DIGEST 起的尾部，其前的 BLOCKED 块要看 recover / 原始日志尾
+        if BLOCKED_RE.search((digest or "") + "\n" + recover + "\n" + log_text[-4000:]):
             summary["blocked"] = True
             runlog(job_dir, "blocked", {"seg": seg_no})
 

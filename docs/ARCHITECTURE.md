@@ -43,7 +43,7 @@
   → write_brief(阶段状态机 infer_phase 依据落盘产物判定 recon/linkage/deep/highrisk/report)
   → spawn pi(新会话=保鲜切片; system prompt 常驻 + BRIEF 注入角色卡/手册/账号/联动配对)
   → Agent 干活(xsreq/browser_probe/字典分级…; 产出 evidence/ 契约+证据, FINDING 行)
-  → 段结束: 提取 digest+findings → runlog 事件 → 投降检测(可注入重试) / BLOCKED(停,等人)
+  → 段结束: 提取 digest+findings(stdout 丢失时从 .pi-sessions jsonl 兜底恢复,防停止信号被吞) → runlog 事件 → 投降检测(可注入重试) / BLOCKED(停,等人)
   → 下一段: 重新 infer_phase(产物变化→阶段推进) → 新鲜上下文接棒
   → 段数或预算尽 → report.py(triage 硬门过滤) → runtime/outputs/report-*.md
 ```
@@ -136,6 +136,7 @@ xs-bigdan/
 | LLM 限流重试 | agent_exec `run_pi_session` | 429/5xx deadline 感知重试≤2;402/鉴权=致命直接失败;失败原因入报告 |
 | 投降检测 | core/retry_detector | agent 说"放弃"→下段强制注入换角度指令(≤2次) |
 | BLOCKED 协议 | system.md+bigdan | 凭证/验证码/授权不明→停;webui 提供线索→user_input.md 注入下段 |
+| 会话 Cookie/用户意图 | webui 建任务+write_brief | 建任务时可填 cookie(每行一账号,自动按 host 隔离,多账号→差分指引)与想法→job 目录 cookies.txt/intent.md→每段 BRIEF;browser_probe --cookie 浏览器层注入 |
 | triage 硬门 | core/report.py | CONFIRMED 4项机械检查(类型/URL/证据/影响),不过自动降 PENDING |
 | 任务队列 | webui/core.py | 全局串行绝不并行;queue.json 持久化;webui 重启自动接力 |
 | 账号池 | bigdan.py `parse_credentials` | scope 匹配注入 BRIEF;≤2/s 红线随行 |

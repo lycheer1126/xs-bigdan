@@ -564,6 +564,8 @@ def _run_pi_session_once(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",  # Windows 默认 GBK 会在中文输出上抛解码异常，吞掉整段最终输出
+                errors="replace",
                 bufsize=1,
             )
             assert proc.stdout is not None

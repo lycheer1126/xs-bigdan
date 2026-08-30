@@ -22,6 +22,8 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 class NewTaskReq(BaseModel):
     url: str = Field(min_length=4, max_length=500)
     note: str = ""
+    cookie: str = Field(default="", max_length=20000)
+    intent: str = Field(default="", max_length=4000)
     job_timeout: int = Field(default=core.DEFAULT_JOB_TIMEOUT, ge=90, le=14400)
     segments: int = Field(default=core.DEFAULT_SEGMENTS, ge=1, le=10)
 
@@ -54,7 +56,8 @@ def create_task(req: NewTaskReq):
     if not req.url.strip():
         raise HTTPException(400, "URL 不能为空")
     try:
-        return core.start_task(req.url, req.note, req.job_timeout, req.segments)
+        return core.start_task(req.url, req.note, req.job_timeout, req.segments,
+                               req.cookie, req.intent)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -62,6 +65,8 @@ def create_task(req: NewTaskReq):
 class BatchTaskReq(BaseModel):
     urls_text: str = Field(min_length=1, max_length=50000)
     note: str = ""
+    cookie: str = Field(default="", max_length=20000)
+    intent: str = Field(default="", max_length=4000)
     job_timeout: int = Field(default=core.DEFAULT_JOB_TIMEOUT, ge=90, le=14400)
     segments: int = Field(default=core.DEFAULT_SEGMENTS, ge=1, le=10)
 
@@ -70,7 +75,8 @@ class BatchTaskReq(BaseModel):
 def batch_create(req: BatchTaskReq):
     """批量新建：每行一个 URL（可整批粘贴），自动生成 id，按粘贴顺序入队串行执行（绝不并行）。"""
     try:
-        return core.enqueue_tasks(req.urls_text, req.note, req.job_timeout, req.segments)
+        return core.enqueue_tasks(req.urls_text, req.note, req.job_timeout, req.segments,
+                                  req.cookie, req.intent)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

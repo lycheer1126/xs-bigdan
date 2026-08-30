@@ -1,0 +1,12 @@
+# xs-bigdan 依赖
+# 核心必需（调度器 + webui 控制台）
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.6
+
+# 浏览器层（browser_probe.py: 登录态浏览/渲染验证/功能点遍历）
+# 装完依赖后还需: playwright install chromium && playwright install-deps chromium
+playwright>=1.44
+
+# 验证码识别（滑块/图形码自动登录，ddddocr 本地离线推理）
+ddddocr>=1.4
