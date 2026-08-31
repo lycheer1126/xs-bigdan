@@ -2,7 +2,7 @@
 
 **Agent 自动化 SRC 漏洞挖掘系统：薄 Harness + Pi Agent + 知识飞轮**
 
-> 操作规范见 [docs/USAGE.md](docs/USAGE.md) · 架构详解见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · VPS 夜跑部署见 [docs/DEPLOY.md](docs/DEPLOY.md) · 演进路线见 [docs/BACKLOG.md](docs/BACKLOG.md)
+> 操作规范见 [docs/USAGE.md](docs/USAGE.md) · 架构详解见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · VPS 7×24H部署方式见 [docs/DEPLOY.md](docs/DEPLOY.md) · 演进路线见 [docs/BACKLOG.md](docs/BACKLOG.md)
 >
 > ⚠️ **仅限明确授权的目标**（SRC 收录 / 书面委托）。未授权渗透测试违法，因使用本项目产生的后果由使用者自行承担。
 
