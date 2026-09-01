@@ -167,11 +167,14 @@ try:
         {"_meta": {"analysis_completeness": 0.9},
          "endpoints": [{"path": "/a"}, {"path": "/b"}, {"path": "/c"}]}), encoding="utf-8")
     ok, why = _early_stop_gate(jd2)
-    check("早停门槛:联动消费0拒绝", (not ok) and "联动" in why, why)
+    check("早停门槛:契约过但无指纹 拒绝", (not ok) and "指纹" in why, why)
+    (ev2 / "_fingerprint.md").write_text("WAF 状态: 未检测到 WAF 特征; 技术栈: Tengine\n", encoding="utf-8")
+    ok, why = _early_stop_gate(jd2)
+    check("早停门槛:契约+指纹但联动0 拒绝", (not ok) and "联动" in why, why)
     (ev2 / "_linkage_results.jsonl").write_text(
         json.dumps({"endpoint": "/a", "param": "id", "value": "1", "hit": False}) + "\n", encoding="utf-8")
     ok, why = _early_stop_gate(jd2)
-    check("早停门槛:契约+联动达标放行", ok, why)
+    check("早停门槛:契约+指纹+联动全达标放行", ok, why)
     (jd2 / "digest-1.md").write_text("### RECON_DIGEST\n建议结束\n", encoding="utf-8")
     (jd2 / "earlystop-deny-1.txt").write_text("deny\n", encoding="utf-8")
     phase, _ = infer_phase(jd2)
@@ -197,7 +200,17 @@ try:
     check("highrisk门:零确认+有WAF 谨慎进deep", phase == "deep", f"phase={phase} ({basis})")
     (ev3 / "_fingerprint.md").unlink()
     phase, basis = infer_phase(jd3)
-    check("highrisk门:指纹缺失 保守进deep", phase == "deep", f"phase={phase} ({basis})")
+    check("指纹门:指纹缺失 回 recon 补门(不进普通测试)", phase == "recon", f"phase={phase} ({basis})")
+
+    # bypass 正式化 + data_not_public 机械检查
+    from bigdan import PHASE_READ_INDEX  # noqa: E402
+    check("Phase4正式化:linkage 读取索引注入 403-bypass",
+          any("403-bypass-complete" in p for p, _ in PHASE_READ_INDEX["linkage"]))
+    from core.report import _triage_check  # noqa: E402
+    t_ok = _triage_check({"type": "信息泄露"},
+                         "URL: http://x.com/api\n影响: 可读取用户手机号(前端已展示该数据)\n")
+    check("triage data_not_public:证据自述前端已展示→降级原因",
+          any("data_not_public" in r for r in t_ok), str(t_ok))
 finally:
     shutil.rmtree(tmp2, ignore_errors=True)
 

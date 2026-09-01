@@ -116,6 +116,15 @@
 - 路径穿越:/static/../..//etc/passwd 或编码绕过。
 - **XSS 预检两步法**:①`<s>XSS</s>` 看是否渲染删除线 ②`<img src=x onerror="console.log('xss')">` 看 console。未渲染即停,不深挖。
 - **Host 头注入**:发现密码重置接口 → 改 Host/X-Forwarded-Host 看邮件链接域名。
+- **访问屏障处理（403/401/登录跳转——mastermind Phase 4 正式化，遇屏障必走完整流程）**:
+  403/401 不是"记录等 token"就完事——按序尝试,命中即停:
+  ① 路径操纵(`..;/`/编码/大小写/尾斜杠/双写) ② 方法切换(GET/POST/PUT/DELETE/OPTIONS)
+  ③ Header 注入(X-Forwarded-For: 127.0.0.1/X-Original-URL/X-Rewrite-URL/客户端IP)
+  ④ 协议降级(HTTPS→HTTP/2→HTTP) ⑤ 组合攻击。
+  完整清单 `references/403-bypass-complete.md`(BRIEF 读取索引已注入,命中即读)。
+  绕过成功的端点必须回测(带/不带绕过参数各一次)并记录结果进已试路径。
+  **无 403/401 屏障 → digest 写"SKIPPED bypass — 无访问屏障"**;401 且无凭据 → BLOCKED
+  凭证门(system.md)。WAF Bypass 是最终手段,仅 highrisk 阶段确认高价值被 WAF 挡时才用。
 - **低成本注入探针（linkage 即测,不等 highrisk 门——零确认目标也必须测完这层才许收工）**:
   单请求差分探针成本极低,**OOB 优先（参照 mastermind 12.2）**:盲打类一律走 dnslog.cn
   (最快)→ Burp Collaborator → interactsh。**每类参数只试 1-2 次、命中即停**:
@@ -173,6 +182,9 @@
 - 登录接口用户枚举 → 低危,记录即可。
 - 弱口令:仅明确授权时测,≤2 req/s,命中即停。
 - 硬编码凭据(apiKey/secretKey/JWT Secret)→ **可直接成洞**(P0),但大模型/地图类第三方 key 跳过。
+- **非漏洞判定(mastermind 0.3,禁止标记为漏洞)**:自己数据≠泄露(须证明他人数据/未授权);
+  响应含自己信息≠信息泄露;token 随机不可预测≠泄露;导出自己数据=正常功能;
+  版本泄露/空数组/配置缺失单独存在不标。完整五条见 system.md。
 
 ## 10. 报告要点(triage 6 项检查)
 

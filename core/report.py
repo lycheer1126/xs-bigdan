@@ -223,6 +223,8 @@ def _finding_detail(i: int, f: dict, job_dir: Path) -> List[str]:
 
 _URL_RE = re.compile(r"https?://[^\s'\"<>]+")
 _IMPACT_HINT_RE = re.compile(r"(能|可|导致|任意|越权|接管|泄露|泄漏|执行|删除|读取|修改|获取|绕过|冒充|遍历|导出)")
+# data_not_public 机械近似（triage 6 项之⑥）:agent 证据自述数据前端已展示 → 提示人工复核
+_FRONTEND_PUBLIC_RE = re.compile(r"前端.{0,8}(展示|可见|已显示|公开)|页面.{0,8}(展示|可见|已显示|公开)|UI.{0,4}(展示|可见|已显示)|已在(前端|页面).{0,6}(展示|显示|公开)")
 
 
 def _triage_check(finding: dict, ev_text: str) -> List[str]:
@@ -235,6 +237,8 @@ def _triage_check(finding: dict, ev_text: str) -> List[str]:
     impact_desc = (m.group(1)[:300] if m else "").strip()
     if not _IMPACT_HINT_RE.search(impact_desc):
         reasons.append("无影响描述或未写明具体后果")
+    if _FRONTEND_PUBLIC_RE.search(ev_text or ""):
+        reasons.append("证据自述数据前端/页面已展示(未过 data_not_public 检查)")
     return reasons
 
 

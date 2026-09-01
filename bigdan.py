@@ -226,6 +226,7 @@ PHASE_READ_INDEX = {
         ("skills/xs_auth/SKILL.md", "BRIEF 注入了测试账号时:登录口逻辑审计手册(JS审计→定向验证→接管链)"),
         ("skills/business_flow/SKILL.md", "BRIEF 注入了账号/Cookie 时:登录态功能点遍历(四问框架+寻路四式+返回包地图)"),
         ("skills/hunt_ssrf/SKILL.md", "SSRF 狩猎手册:URL类参数优先测(低成本高价值,OOB确认→云元数据表→绕过变体→盲打三连)"),
+        ("references/403-bypass-complete.md", "访问屏障处理(mastermind Phase 4):遇 403/401 按序尝试 路径操纵→方法切换→Header注入→协议降级→组合;无屏障则 digest 写 SKIPPED"),
     ],
     "deep": [  # 🟡 条件阶段: JWT/加密/端点榨干（无 JWT 且无加密体→跳过并写 digest）
         ("skills/jwt_attack/SKILL.md", "发现 JWT 时:全攻击链(alg:none/弱密钥/kid/RS256→HS256)"),
@@ -301,12 +302,14 @@ def _linkage_consumed(job_dir: Path) -> int:
 def _early_stop_gate(job_dir: Path) -> tuple[bool, str]:
     """早停机械门槛:最小攻击面覆盖（防"没测完就建议结束"）。
 
-    纯落盘产物判定,不依赖 agent 自觉:recon 门过(契约文件达标) + 联动消费 ≥1
-    (值池联动/参数测试至少产出过一条结果)。产物不达标 → 拒绝早停,下段补测。
+    纯落盘产物判定,不依赖 agent 自觉:recon 门过(契约文件达标) + 指纹落盘(WAF 状态确认)
+    + 联动消费 ≥1(值池联动/参数测试至少产出过一条结果)。产物不达标 → 拒绝早停,下段补测。
     """
     gate_ok, gate_why = _recon_gate(job_dir)
     if not gate_ok:
         return False, f"recon 门未过({gate_why})——JS 分析/契约文件未达标"
+    if not _fingerprint_ok(job_dir):
+        return False, "指纹未落盘(_fingerprint.md 缺失——WAF 状态未确认,普通测试层不完整)"
     if _linkage_consumed(job_dir) < 1:
         return False, "联动消费=0(值池联动/参数测试未产出任何结果,参数面疑似未测)"
     return True, ""
@@ -338,23 +341,41 @@ def infer_phase(job_dir: Path) -> tuple[str, str]:
                     return "report", "最新 digest 标注建议结束"
             except OSError:
                 pass
-    # highrisk（mastermind 式价值确认）: recon 门过 + 联动已开工 + (已有 CONFIRMED 或 无 WAF)。
-    # 零确认但普通层完整且无 WAF → 允许补测敏感路径/越权(冒险成本低);有 WAF 保持谨慎。
+    # highrisk（mastermind 式价值确认）: recon 门过 + 指纹落盘 + 联动已开工 + (CONFIRMED≥1 或 无 WAF)。
     gate_ok, gate_why = _recon_gate(job_dir)
     confirmed = _confirmed_count(job_dir)
-    if gate_ok and _linkage_consumed(job_dir) > 0 and (confirmed >= 1 or not _waf_detected(job_dir)):
+    fp_ok = _fingerprint_ok(job_dir)
+    if gate_ok and fp_ok and _linkage_consumed(job_dir) > 0 and (confirmed >= 1 or not _waf_detected(job_dir)):
         if confirmed >= 1:
             return "highrisk", f"已有 {confirmed} 条 CONFIRMED，{gate_why}"
         return "highrisk", f"零 CONFIRMED 但普通层完整且无 WAF(价值确认:可测性高)，{gate_why}"
     if confirmed >= 1:
         return "recon", f"已有发现但 {gate_why}，先补门"
-    # deep / linkage / recon: 由 recon 门与联动消费进度放行
+    # deep / linkage / recon: 由 recon 门 + 指纹落盘 + 联动消费进度放行
     if not gate_ok:
         return "recon", gate_why
+    if not fp_ok:
+        return "recon", "指纹未落盘(_fingerprint.md 缺失——WAF 状态未确认，Safe-First 不许进普通测试)，先补 recon"
     consumed = _linkage_consumed(job_dir)
     if consumed > 0:
         return "deep", f"联动已消费 {consumed} 条配对且暂无 CONFIRMED，转入 JWT/加密/端点榨干"
     return "linkage", f"{gate_why}，值池联动尚未消费"
+
+
+def _fingerprint_ok(job_dir: Path) -> bool:
+    """指纹落盘检查:evidence/_fingerprint.md 存在且非空——WAF 状态已确认的证据载体。
+
+    README/methodology 一直声称"指纹产物是 linkage 门'WAF 状态已确认'的证据载体"，
+    但 infer_phase 从未真正检查——Safe-First 缺口:WAF 未知就进普通测试。
+    现在真正落地:linkage/deep/highrisk 门统一要求指纹落盘。
+    """
+    fp = job_dir / "evidence" / "_fingerprint.md"
+    if not fp.is_file():
+        return False
+    try:
+        return len(fp.read_text(encoding="utf-8", errors="replace").strip()) > 10
+    except OSError:
+        return False
 
 
 def _waf_detected(job_dir: Path) -> bool:
