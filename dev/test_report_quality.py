@@ -241,6 +241,26 @@ try:
     brief4b = brief_read_index((jd4 / "BRIEF.md").read_text(encoding="utf-8"))
     check("条件注入:有 cookies.txt 时读取索引注入 xs_auth+business_flow",
           "xs_auth" in brief4b and "business_flow" in brief4b)
+
+    # 登录口末位测试（无账号场景结束前必测——早停门槛机械检查）
+    from bigdan import _has_login_surface, _login_probe_done  # noqa: E402
+    check("登录口判定:无登录类端点=False", not _has_login_surface(jd2))
+    ep2 = json.loads((ev2 / "_endpoint_params.json").read_text(encoding="utf-8"))
+    ep2["endpoints"].append({"path": "/login", "method": "POST"})
+    (ev2 / "_endpoint_params.json").write_text(json.dumps(ep2), encoding="utf-8")
+    check("登录口判定:含 /login 端点=True", _has_login_surface(jd2))
+    check("登录口判定:未测=False", not _login_probe_done(jd2))
+    # jd2 无 cookies.txt + 有登录口 + 未测 → 早停被拒
+    (jd2 / "digest-2.md").write_text("### RECON_DIGEST\n建议结束\n", encoding="utf-8")
+    ok, why = _early_stop_gate(jd2)
+    check("末位测试门:无账号+有登录口+未测 拒绝早停", (not ok) and "登录口" in why, why)
+    (ev2 / "_login_probe.txt").write_text("弱口令|无命中|false\n轰炸|限流正常|false\n", encoding="utf-8")
+    ok, why = _early_stop_gate(jd2)
+    check("末位测试门:落盘 _login_probe.txt 后放行", ok, why)
+    (ev2 / "_login_probe.txt").unlink()
+    (jd2 / "cookies.txt").write_text("session=x\n", encoding="utf-8")
+    ok, why = _early_stop_gate(jd2)
+    check("末位测试门:有 cookies.txt 时不要求末位测试", ok, why)
 finally:
     shutil.rmtree(tmp2, ignore_errors=True)
 

@@ -307,11 +307,35 @@ def _linkage_consumed(job_dir: Path) -> int:
     return n
 
 
+_LOGIN_SURFACE_RE = re.compile(r"login|signin|register|signup|reset|verify|sms|captcha|passwd|password|auth", re.I)
+
+
+def _has_login_surface(job_dir: Path) -> bool:
+    """登录口存在判定:契约文件端点的路径含登录/注册/找回/验证码类关键词。"""
+    ep = job_dir / "evidence" / "_endpoint_params.json"
+    if not ep.is_file():
+        return False
+    try:
+        data = json.loads(ep.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    for e in data.get("endpoints") or []:
+        if _LOGIN_SURFACE_RE.search(str(e.get("path") or "")):
+            return True
+    return False
+
+
+def _login_probe_done(job_dir: Path) -> bool:
+    """登录口末位测试落盘检查:evidence/_login_probe.txt 存在即视为已测(内容由 agent 按协议写)。"""
+    return (job_dir / "evidence" / "_login_probe.txt").is_file()
+
+
 def _early_stop_gate(job_dir: Path) -> tuple[bool, str]:
     """早停机械门槛:最小攻击面覆盖（防"没测完就建议结束"）。
 
     纯落盘产物判定,不依赖 agent 自觉:recon 门过(契约文件达标) + 指纹落盘(WAF 状态确认)
-    + 联动消费 ≥1(值池联动/参数测试至少产出过一条结果)。产物不达标 → 拒绝早停,下段补测。
+    + 联动消费 ≥1(值池联动/参数测试至少产出过一条结果) + 登录口末位测试(无账号场景)。
+    产物不达标 → 拒绝早停,下段补测。
     """
     gate_ok, gate_why = _recon_gate(job_dir)
     if not gate_ok:
@@ -320,6 +344,8 @@ def _early_stop_gate(job_dir: Path) -> tuple[bool, str]:
         return False, "指纹未落盘(_fingerprint.md 缺失——WAF 状态未确认,普通测试层不完整)"
     if _linkage_consumed(job_dir) < 1:
         return False, "联动消费=0(值池联动/参数测试未产出任何结果,参数面疑似未测)"
+    if not (job_dir / "cookies.txt").is_file() and _has_login_surface(job_dir) and not _login_probe_done(job_dir):
+        return False, "登录口末位测试未执行(弱口令6×6/轰炸测试号/接管观察——无账号场景结束前必测,结果落盘 evidence/_login_probe.txt)"
     return True, ""
 
 
