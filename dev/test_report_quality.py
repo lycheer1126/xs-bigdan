@@ -172,8 +172,11 @@ try:
     (ev2 / "_fingerprint.md").write_text("WAF 状态: 未检测到 WAF 特征; 技术栈: Tengine\n", encoding="utf-8")
     ok, why = _early_stop_gate(jd2)
     check("早停门槛:契约+指纹但联动0 拒绝", (not ok) and "联动" in why, why)
-    (ev2 / "_linkage_results.jsonl").write_text(
-        json.dumps({"endpoint": "/a", "param": "id", "value": "1", "hit": False}) + "\n", encoding="utf-8")
+    (ev2 / "_linkage_results.jsonl").write_text("\n".join([
+        json.dumps({"endpoint": "/a", "param": "id", "value": "1", "hit": False}),
+        json.dumps({"endpoint": "/b", "hit": False}),
+        json.dumps({"endpoint": "/c", "hit": True}),
+    ]) + "\n", encoding="utf-8")
     ok, why = _early_stop_gate(jd2)
     check("早停门槛:契约+指纹+联动全达标放行", ok, why)
     (jd2 / "digest-1.md").write_text("### RECON_DIGEST\n建议结束\n", encoding="utf-8")
@@ -250,7 +253,9 @@ try:
     (ev2 / "_endpoint_params.json").write_text(json.dumps(ep2), encoding="utf-8")
     check("登录口判定:含 /login 端点=True", _has_login_surface(jd2))
     check("登录口判定:未测=False", not _login_probe_done(jd2))
-    # jd2 无 cookies.txt + 有登录口 + 未测 → 早停被拒
+    # /login 端点写 skipped 不可达记录 → 端点覆盖全过,由登录口末位测试检查拦截
+    with open(ev2 / "_linkage_results.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps({"endpoint": "/login", "skipped": "弱口令已测,需真实账号"}) + "\n")
     (jd2 / "digest-2.md").write_text("### RECON_DIGEST\n建议结束\n", encoding="utf-8")
     ok, why = _early_stop_gate(jd2)
     check("末位测试门:无账号+有登录口+未测 拒绝早停", (not ok) and "登录口" in why, why)
@@ -317,6 +322,35 @@ try:
     ctx = compose_context(jd3)
     check("被拒醒目块:deny 存在时拼进 prompt 最前部且含原因",
           ctx.startswith("### ⚠️ 上段被机械门槛拒绝") and "联动消费=0" in ctx)
+
+    # 端点覆盖完整性（lingan 案例修复:上传等功能面未测不许收工）
+    from bigdan import _endpoint_coverage  # noqa: E402
+    jd7 = tmp2 / "ui-test-0007"
+    ev7 = jd7 / "evidence"
+    ev7.mkdir(parents=True)
+    ep7 = {"_meta": {"analysis_completeness": 0.9},
+           "endpoints": [{"path": "/api/upload"}, {"path": "/api/avatar"},
+                         {"path": "/api/list"}, {"path": "/api/export"}]}
+    (ev7 / "_endpoint_params.json").write_text(json.dumps(ep7), encoding="utf-8")
+    (ev7 / "_fingerprint.md").write_text("WAF 状态: 无; 技术栈: Tengine\n", encoding="utf-8")
+    (ev7 / "_linkage_results.jsonl").write_text("\n".join([
+        json.dumps({"endpoint": "/api/list", "hit": False}),
+        json.dumps({"endpoint": "/api/export", "hit": True}),
+    ]) + "\n", encoding="utf-8")
+    cov, tot, unc = _endpoint_coverage(jd7)
+    check("端点覆盖:2/4 且 upload 未覆盖", cov == 2 and tot == 4 and "/api/upload" in unc,
+          f"覆盖 {cov}/{tot} 未覆盖={unc}")
+    ok, why = _early_stop_gate(jd7)
+    check("端点覆盖:未测 upload 拒绝早停(原因列出端点)",
+          (not ok) and "端点覆盖不完整" in why and "/api/upload" in why, why)
+    (ev7 / "_linkage_results.jsonl").write_text("\n".join([
+        json.dumps({"endpoint": "/api/list", "hit": False}),
+        json.dumps({"endpoint": "/api/export", "hit": True}),
+        json.dumps({"endpoint": "/api/upload", "skipped": "需素材账号"}),
+        json.dumps({"endpoint": "/api/avatar", "skipped": "编辑器不可达"}),
+    ]) + "\n", encoding="utf-8")
+    ok, why = _early_stop_gate(jd7)
+    check("端点覆盖:写 skipped 不可达原因后放行", ok, why)
 finally:
     shutil.rmtree(tmp2, ignore_errors=True)
 

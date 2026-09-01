@@ -334,6 +334,42 @@ def _has_login_surface(job_dir: Path) -> bool:
     return False
 
 
+def _endpoint_coverage(job_dir: Path) -> tuple[int, int, List[str]]:
+    """端点覆盖账本:契约端点中被联动记录覆盖(测过 hit!=None 或 写明不可达 skipped)的比例。
+
+    覆盖完整性机械保证(2026-09 加固):lingan 案例暴露——agent 看到上传/OSS 配置却没测
+    就建议结束,其他功能面(上传/导入/导出/配置)全靠自觉。现在要求:
+    每个契约端点要么测过(联动记录),要么写明不可达原因(skipped 记录),否则早停被拒。
+    返回 (已覆盖数, 契约端点数, 未覆盖端点列表)。
+    """
+    ep = job_dir / "evidence" / "_endpoint_params.json"
+    if not ep.is_file():
+        return 0, 0, []
+    try:
+        data = json.loads(ep.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return 0, 0, []
+    endpoints = [str(e.get("path") or "").strip() for e in (data.get("endpoints") or [])]
+    endpoints = [p for p in endpoints if p]
+    if not endpoints:
+        return 0, 0, []
+    covered: set[str] = set()
+    p = job_dir / "evidence" / "_linkage_results.jsonl"
+    if p.is_file():
+        for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ep_path = str(rec.get("endpoint") or "").strip()
+            if not ep_path:
+                continue
+            if rec.get("hit") is not None or str(rec.get("skipped") or "").strip():
+                covered.add(ep_path)
+    uncovered = [p for p in endpoints if p not in covered]
+    return len(endpoints) - len(uncovered), len(endpoints), uncovered
+
+
 _LOGIN_PROBE_HINT_RE = re.compile(r"弱口令|轰炸|接管|无登录口|login_probe|登录口", re.I)
 
 
@@ -367,6 +403,11 @@ def _early_stop_gate(job_dir: Path) -> tuple[bool, str]:
         return False, "指纹未落盘(_fingerprint.md 缺失——WAF 状态未确认,普通测试层不完整)"
     if _linkage_consumed(job_dir) < 1:
         return False, "联动消费=0(值池联动/参数测试未产出任何结果,参数面疑似未测)"
+    covered, total, uncovered = _endpoint_coverage(job_dir)
+    if uncovered:
+        sample = "、".join(uncovered[:5]) + ("…" if len(uncovered) > 5 else "")
+        return False, (f"端点覆盖不完整:{covered}/{total}(未测或未写明不可达原因:"
+                       f"{sample})——每个契约端点要么测过(联动记录)要么写 skipped 不可达原因")
     if not (job_dir / "cookies.txt").is_file() and _has_login_surface(job_dir) and not _login_probe_done(job_dir):
         return False, "登录口末位测试未执行(弱口令6×6/轰炸测试号/接管观察——无账号场景结束前必测,结果落盘 evidence/_login_probe.txt)"
     return True, ""
