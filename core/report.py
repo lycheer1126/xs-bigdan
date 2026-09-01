@@ -142,6 +142,21 @@ def _evidence_block(path: Path, limit: int = 6000) -> str:
     return f"```\n{text}\n```"
 
 
+def _digest_full(job_dir: Path, limit: int = 6000) -> str:
+    """最新 digest 全文（行边界截断）——报告附录用：Agent 原始交接即线索挖掘素材。"""
+    digests = sorted(job_dir.glob("digest-*.md"))
+    if not digests:
+        return ""
+    text = digests[-1].read_text(encoding="utf-8", errors="replace").strip()
+    if len(text) > limit:
+        cut = text[:limit]
+        nl = cut.rfind("\n")
+        if nl > limit // 2:
+            cut = cut[:nl]
+        text = cut + "\n...(digest 过长已截断，全文见 jobs/<id>/digest-*.md)"
+    return text
+
+
 def _impact_from_evidence(text: str) -> str:
     """从证据文本提取「影响」说明（尽力而为）。"""
     for pat in (r"影响[^\n]{2,200}", r"危害[^\n]{2,200}", r"后果[^\n]{2,200}"):
@@ -420,6 +435,26 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
     lines.append("3. 组件升级到已修复版本，移除调试信息与默认入口。")
     lines.append("4. 按「漏洞详情」各条针对性修复，修复后按原请求包回归复测。")
     lines.append("")
+
+    # 附录：Agent 原始交接（与正文分开的线索挖掘素材——正文只收可提交漏洞，
+    # digest 里的疑似点/已试路径/工具缺失/下一步建议可能对人工有价值）
+    lines.append("## 附录：Agent 原始交接（digest 全文，正文之外的挖掘素材）")
+    lines.append("")
+    lines.append("> 本附录与报告正文分离：正文只收可提交漏洞；这里保留 Agent 观察到的原始线索")
+    lines.append("> （疑似点差一步闭环 / 已试路径 / 工具缺失 / 下一步建议），部分线索对人工")
+    lines.append("> 挖掘有价值——看到线索就知道怎么打的场景，请优先翻阅本附录。")
+    lines.append("")
+    for s in summaries:
+        digest = _digest_full(jobs_dir / s["id"])
+        lines.append(f"### {s['id']}")
+        lines.append("")
+        if digest:
+            lines.append("```markdown")
+            lines.append(digest)
+            lines.append("```")
+        else:
+            lines.append("（无 digest）")
+        lines.append("")
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("\n".join(lines), encoding="utf-8")
