@@ -100,8 +100,8 @@ def _evidence_files(job_dir: Path) -> List[Path]:
     return sorted(ev.glob("*.txt"))
 
 
-def _digest_text(job_dir: Path, tail: int = 1500) -> str:
-    """最新 digest 全文（前缀已在 bigdan.extract_digest 剥离），限长截断。"""
+def _digest_text(job_dir: Path, tail: int = 8000) -> str:
+    """最新 digest 全文（前缀已在 bigdan.extract_digest 剥离），仅极端超大才截断。"""
     digests = sorted(job_dir.glob("digest-*.md"))
     if not digests:
         return "（无）"
@@ -111,7 +111,7 @@ def _digest_text(job_dir: Path, tail: int = 1500) -> str:
     return text
 
 
-def _extract_digest_section(job_dir: Path, keyword: str, tail: int = 400) -> str:
+def _extract_digest_section(job_dir: Path, keyword: str, tail: int = 4000) -> str:
     """从 digest 提取某小节(如「疑似点」)文本；找不到返回空串。"""
     digests = sorted(job_dir.glob("digest-*.md"))
     if not digests:
@@ -130,8 +130,8 @@ def _evidence_clues(job_dir: Path) -> List[Path]:
     return [p for p in _evidence_files(job_dir) if not p.name.startswith("_")]
 
 
-def _evidence_block(path: Path, limit: int = 6000) -> str:
-    """证据全文内联（复现可读性优先）：上限 6000 字符并按行边界截断，避免请求包被掐断。"""
+def _evidence_block(path: Path, limit: int = 50000) -> str:
+    """证据全文内联（SRC 提交需要完整 Payload/响应,不可截断）：仅 >50KB 极端超大才截断。"""
     text = path.read_text(encoding="utf-8", errors="replace").strip()
     if len(text) > limit:
         cut = text[:limit]
@@ -142,8 +142,8 @@ def _evidence_block(path: Path, limit: int = 6000) -> str:
     return f"```\n{text}\n```"
 
 
-def _digest_full(job_dir: Path, limit: int = 6000) -> str:
-    """最新 digest 全文（行边界截断）——报告附录用：Agent 原始交接即线索挖掘素材。"""
+def _digest_full(job_dir: Path, limit: int = 20000) -> str:
+    """最新 digest 全文（仅 >20KB 极端超大才截断）——报告附录用：Agent 原始交接即线索挖掘素材。"""
     digests = sorted(job_dir.glob("digest-*.md"))
     if not digests:
         return ""
@@ -258,11 +258,11 @@ def _finding_detail(i: int, f: dict, job_dir: Path) -> List[str]:
         lines.append("```")
         lines.append("")
 
-    # 关键响应
+    # 关键响应（全文内联,SRC 提交需要完整响应）
     if evp and evp.is_file():
-        resp = _evidence_block(evp, limit=3000)
-        if raw:  # 有 Payload 时响应节选作为补充
-            lines.append("**关键响应（节选）**:")
+        resp = _evidence_block(evp, limit=50000)
+        if raw:  # 有 Payload 时响应作为补充
+            lines.append("**关键响应**:")
             lines.append("")
             lines.append(resp)
             lines.append("")
