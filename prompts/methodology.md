@@ -117,10 +117,14 @@
 - **XSS 预检两步法**:①`<s>XSS</s>` 看是否渲染删除线 ②`<img src=x onerror="console.log('xss')">` 看 console。未渲染即停,不深挖。
 - **Host 头注入**:发现密码重置接口 → 改 Host/X-Forwarded-Host 看邮件链接域名。
 - **低成本注入探针（linkage 即测,不等 highrisk 门——零确认目标也必须测完这层才许收工）**:
-  单请求差分探针成本极低、不触发 WAF,**每类参数只试 1-2 次、命中即停**:
-  SQLi 差分 `id=3-1`(数字)/`1'`(字符)、SSTI `${7*7}`、CMD `;sleep 2`/`|id`、
-  SSRF `http://127.0.0.1:80`、XXE OOB(仅 XML 提交点)。全参数试完无差异 → 才允许
-  在 digest 写"注入面无差异"并建议结束;禁止跳过该层直接收工。
+  单请求差分探针成本极低,**OOB 优先（参照 mastermind 12.2）**:盲打类一律走 dnslog.cn
+  (最快)→ Burp Collaborator → interactsh。**每类参数只试 1-2 次、命中即停**:
+  - SQLi 差分 `id=3-1`(数字)/`1'`(字符),盲注用 `SLEEP(5)` 计时+OOB 佐证
+  - SSTI `${7*7}`;CMD `;ping dnslog子域`/`|id`(OOB 回连优先于回显)
+  - **SSRF:url 参数换 dnslog 子域(有回调=确认)——禁止直打 127.0.0.1/169.254.x(一打就触发
+    WAF 拦截,且打草惊蛇);OOB 确认后才做内网/元数据确认(云元数据表见 hunt_ssrf)**
+  - XXE OOB(仅 XML 提交点,`<!DOCTYPE>` 外带 dnslog)
+  全参数试完无差异 → 才允许在 digest 写"注入面无差异"并建议结束;禁止跳过该层直接收工。
 
 ## 5. JWT 与加密
 
@@ -132,7 +136,7 @@
 
 ## 6. 高危探测(手工,条件触发)
 
-前置:已确认 ≥1 个中危+(目标有价值)才做;全程 SAFE MODE。
+前置:普通层(§3-4)完整 + 价值确认(已有中危+ 发现,或 指纹确认无 WAF——无 WAF 时敏感路径探测冒险成本低);全程 SAFE MODE。零发现+有 WAF → 不进本层,原因写 digest(显式跳过,禁止静默)。
 - 注入探针已在 linkage(§4 低成本探针层)测完——本阶段只对**已命中**的注入点做利用链/深挖,不再广撒网。
 - Admin 路径:Java→/actuator | PHP→/.env | Python→/admin/ | .NET→/web.config。
 - 垂直越权:已获得 token 逐条测管理端点;导出接口(export/download/excel/csv)权限单独测。

@@ -338,21 +338,39 @@ def infer_phase(job_dir: Path) -> tuple[str, str]:
                     return "report", "最新 digest 标注建议结束"
             except OSError:
                 pass
-    # highrisk: ≥1 CONFIRMED 且 recon 门已过（门没过→回 recon 补，写明原因）
+    # highrisk（mastermind 式价值确认）: recon 门过 + 联动已开工 + (已有 CONFIRMED 或 无 WAF)。
+    # 零确认但普通层完整且无 WAF → 允许补测敏感路径/越权(冒险成本低);有 WAF 保持谨慎。
+    gate_ok, gate_why = _recon_gate(job_dir)
     confirmed = _confirmed_count(job_dir)
-    if confirmed >= 1:
-        gate_ok, gate_why = _recon_gate(job_dir)
-        if gate_ok:
+    if gate_ok and _linkage_consumed(job_dir) > 0 and (confirmed >= 1 or not _waf_detected(job_dir)):
+        if confirmed >= 1:
             return "highrisk", f"已有 {confirmed} 条 CONFIRMED，{gate_why}"
+        return "highrisk", f"零 CONFIRMED 但普通层完整且无 WAF(价值确认:可测性高)，{gate_why}"
+    if confirmed >= 1:
         return "recon", f"已有发现但 {gate_why}，先补门"
     # deep / linkage / recon: 由 recon 门与联动消费进度放行
-    gate_ok, gate_why = _recon_gate(job_dir)
     if not gate_ok:
         return "recon", gate_why
     consumed = _linkage_consumed(job_dir)
     if consumed > 0:
         return "deep", f"联动已消费 {consumed} 条配对且暂无 CONFIRMED，转入 JWT/加密/端点榨干"
     return "linkage", f"{gate_why}，值池联动尚未消费"
+
+
+def _waf_detected(job_dir: Path) -> bool:
+    """从 evidence/_fingerprint.md 判 WAF 状态（保守:无法确定时视为有 WAF,避免打草惊蛇）。"""
+    fp = job_dir / "evidence" / "_fingerprint.md"
+    if not fp.is_file():
+        return True  # 指纹未落盘 → 未知 → 按有 WAF 处理
+    try:
+        text = fp.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return True
+    if re.search(r"无\s*WAF|未(?:检测|发现).{0,6}WAF|WAF.{0,4}无|no waf|waf:\s*none", text, re.I):
+        return False
+    if re.search(r"WAF|Cloudflare|Akamai|Imperva|CloudFront|aliyun|腾讯云|iflysec|Fastly|stgw", text, re.I):
+        return True
+    return True  # 提到但不确定 → 保守视为有
 
 
 def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_idx: int = 0,

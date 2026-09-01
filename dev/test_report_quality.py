@@ -179,6 +179,25 @@ try:
     (jd2 / "earlystop-deny-1.txt").unlink()
     phase, _ = infer_phase(jd2)
     check("infer_phase:无 deny 时建议结束判 report", phase == "report", f"phase={phase}")
+
+    # highrisk 门（mastermind 式价值确认）：零确认 + 无 WAF → 允许进 highrisk 补测敏感路径
+    jd3 = tmp2 / "ui-test-0003"
+    ev3 = jd3 / "evidence"
+    ev3.mkdir(parents=True)
+    (ev3 / "_endpoint_params.json").write_text(json.dumps(
+        {"_meta": {"analysis_completeness": 0.9},
+         "endpoints": [{"path": "/a"}, {"path": "/b"}, {"path": "/c"}]}), encoding="utf-8")
+    (ev3 / "_linkage_results.jsonl").write_text(
+        json.dumps({"endpoint": "/a", "param": "id", "value": "1", "hit": False}) + "\n", encoding="utf-8")
+    (ev3 / "_fingerprint.md").write_text("WAF 状态: 未检测到 WAF 特征; 技术栈: Tengine\n", encoding="utf-8")
+    phase, basis = infer_phase(jd3)
+    check("highrisk门:零确认+无WAF 放行补测", phase == "highrisk", f"phase={phase} ({basis})")
+    (ev3 / "_fingerprint.md").write_text("WAF 状态: 阿里云 WAF(aliws)\n", encoding="utf-8")
+    phase, basis = infer_phase(jd3)
+    check("highrisk门:零确认+有WAF 谨慎进deep", phase == "deep", f"phase={phase} ({basis})")
+    (ev3 / "_fingerprint.md").unlink()
+    phase, basis = infer_phase(jd3)
+    check("highrisk门:指纹缺失 保守进deep", phase == "deep", f"phase={phase} ({basis})")
 finally:
     shutil.rmtree(tmp2, ignore_errors=True)
 
