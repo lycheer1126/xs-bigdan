@@ -135,7 +135,15 @@
   - **盲打类一律 dnslog OOB 确认**(dnslog.cn 最快→Collaborator→interactsh),**禁止直打 127.0.0.1/
     169.254.x 等内网地址**(一打触发 WAF 拦截且打草惊蛇);OOB 回调确认后才做内网/元数据确认
   - **响应驱动**:每类探测 1-2 次,长度/耗时/内容变化决定下一步(差分信号→深挖,无差异→换思路)
+  - **参数级最低矩阵**(有差分面的每个 filter 参数都要过,短枚举字段 vote/status 也测):
+    正常值/空/非法值 → 按栈探针(SQL 面 `'`/布尔,JSON 面操作符,搜索框 ES OR+total,Java HQL/SpEL,
+    有模板 SSTI) → 延时 → WAF 编码换位置(query/json/header/path)。
+    **差分是硬证据**:本租户基线 total/条数 vs payload 后 total/他主体字段。
   - 全参数面按上述原则测完无差异 → 才允许 digest 写"注入面无差异"并建议结束;禁止跳过直接收工。
+- **登录页哲学（吸收实战 skill）**:看见登录页**不是换资产**——先找业务面(本 host 网关/跳转后的业务
+  host)挖未登录;登录表单看得见的打通或证伪就停,繁琐验证/别人 SSO/同皮壳不耗;**同厂商同登录壳只测
+  2-3 个代表**(同皮只比 jump/service/moduleId 是否另一业务面,是就去挖,不是不再开全矩阵)。
+  进会话立刻转对象图/换 id(不限字段名),不要还喷引号。
 - **登录口末位测试层（无账号场景——放最最后做，但结束前必须做）**:
   定位:登录口高险测试(弱口令/轰炸/接管)易触发风控告警,排在**所有无认证面测完之后、收尾之前**;
   但**不能跳过**——成功就赚,低成本高回报。
@@ -177,6 +185,12 @@
 - 响应差异是客观信号:同样输入两次,长度/耗时/内容变化 = 值得深挖。
 - 枚举 miss ≠ 端点不存在:换字典/方法/参数再试一次。
 - 卡住 10 分钟无进展 → 停止该面换面。
+- **中危升链优先（吸收实战 skill）**:确认中危后**先升链再开新面**——同一对象还没走到
+  写/跨用户/接管/可执行,先跟:未授权通了立刻换 id(不限字段名:userId/uid/memberId/phone/回包抄的
+  id);发码接口通了跟认证链(回包有没有码/码绑不绑号/重置换不换用户);文件通道开了转业务链。
+- **禁偏科（吸收实战 skill）**:禁止只堆未授权读/同构列表/信息泄露——注入/SSRF/XSS/RCE 打在
+  有差分面的参数上(未授权读出一批后立刻对同批接口跑注入参数表+SSRF URL 参+XSS 回显+RCE Sink);
+  收尾前自检:发现的类型是否单一且四件套零 payload?是则补打后再收工。
 - **端点覆盖完整性协议（早停门槛机械检查,收工前必过）**:契约文件里的**每个端点**要么
   测过(联动记录写 `hit` 字段),要么写不可达记录 `{"endpoint": "...", "skipped": "差什么原因"}`
   ——**功能面(上传/导入/导出/配置/头像/OSS直传等)独立于登录态,能测就测,不可达必须写明原因**;
@@ -282,6 +296,8 @@
 | knowledge/references/biz-mutations.md | 登录态业务参数扰动字典(七族:状态翻转/类型替换/数量边界/置空删除/结构注入/身份替换/编码探针,命中即停) |
 | knowledge/references/api-testing-methodology.md | API 测试方法论 |
 | knowledge/references/403-bypass-complete.md | 403 绕过全集 |
+| knowledge/references/breakthrough-shortlist.md | 现场手法库:认证绕过/IDOR别停/对象存储矩阵/云IDE链/对话口工具执行(对得上特征就打,假点列防误报) |
+| knowledge/references/advanced-techniques.md | 冷门高命中:幽灵位/WAF厂商矩阵/反序列化指纹/类型混淆/EL注入/XOR藏钥/缓存欺骗/竞态H2单包 |
 | knowledge/references/crypto-analysis.md / jwt-analysis.md | 加密/JWT 分析 |
 | knowledge/references/js-analysis-source-leak.md / js-analysis-vulnforge.md | JS 分析补充 |
 | knowledge/references/ai-security-testing.md 与 ai-security-vulnforge.md | 目标 AI/LLM 时 |
