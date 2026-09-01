@@ -229,7 +229,7 @@
 | knowledge/references/discovery-amplification.md | Phase 2(端点→同类路径/参数榨干) |
 | knowledge/references/high-risk-probing.md | Phase 6 高危探测细节 |
 | knowledge/references/cve-chains.md | 组件命中已知 CVE(Solr/Druid/OFBiz/Spring) |
-| knowledge/references/1day/README.md | 组件指纹命中但疑为私有 1day 时:先 grep 该目录(完整payload,VERIFIED直接用/PENDING先差分),未命中再走检索策略 |
+| knowledge/references/1day/README.md | 组件指纹命中时秒查该目录(人工偶发投喂的非完备库,VERIFIED直接用/PENDING先差分;未命中属正常,直接走模型记忆+检索) |
 | knowledge/references/impact-escalation.md | Phase 5 影响升级框架 |
 | knowledge/references/rating-standard.md | Phase 5 阿里 5 级评级 |
 | knowledge/references/vue-spa-attacks.md | Vue 检测到(路由穷举/守卫绕过/Store) |
