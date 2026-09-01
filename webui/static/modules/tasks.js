@@ -61,6 +61,10 @@ XSModules.tasks = (() => {
           ${taskDate(j.id) ? `<span class="chip-date">${XS.esc(taskDate(j.id))}</span>` : ""}
           ${j.group ? `<span class="chip-grp">📁 ${XS.esc(j.group)}</span>` : ""}
           ${XS.stateBadge(j.state)}
+          ${j.state === "blocked" && j.blocked_hours != null ? `
+            <span class="chip-date" style="color:${j.blocked_hours >= 48 ? "var(--danger)" : "var(--warn)"};
+              border:1px solid ${j.blocked_hours >= 48 ? "rgba(220,38,38,.5)" : "rgba(217,119,6,.5)"}"
+              title="BLOCKED 挂起时长(等人工提供线索/账号)">⏱ 已挂 ${j.blocked_hours >= 48 ? "超48h" : j.blocked_hours + "h"}</span>` : ""}
           <span class="spacer" style="flex:1"></span>
           <span class="card-meta">${j.findings_count} 个发现</span>
         </div>

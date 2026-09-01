@@ -349,6 +349,21 @@ def _early_stop_gate(job_dir: Path) -> tuple[bool, str]:
     return True, ""
 
 
+def _credential_gate_ok(job_dir: Path) -> bool:
+    """凭证门(BLOCKED AUTH_CREDENTIALS)前置门槛:无认证面已测过的落盘证据。
+
+    mastermind 凭证门定义:无认证全扫(Phase 2 Step 0.6)完成之后才统计"80% 需认证"——
+    防止 agent 扫到几个 401 就过早喊账号(无认证面/SSRF/注入探针全没测)。
+    门槛=recon 契约 + 指纹落盘 + 联动消费≥1(与早停门槛前三条一致)。
+    """
+    gate_ok, _ = _recon_gate(job_dir)
+    if not gate_ok:
+        return False
+    if not _fingerprint_ok(job_dir):
+        return False
+    return _linkage_consumed(job_dir) >= 1
+
+
 def infer_phase(job_dir: Path) -> tuple[str, str]:
     """阶段状态机:纯落盘产物推断（零 Agent 新增义务），返回 (阶段, 推断依据)。
 
@@ -870,6 +885,8 @@ def compose_context(job_dir: Path, max_findings: int = 10, tail_events: int = 15
                 ev_lines.append(f"  {t} 早停(段{e.get('seg')})")
             elif typ == "earlystop_deny":
                 ev_lines.append(f"  {t} ⚠️ 建议结束被拒(段{e.get('seg')}):{e.get('why')}——本段须补测后重新建议结束")
+            elif typ == "blocked_deny":
+                ev_lines.append(f"  {t} ⚠️ 凭证门被拒(段{e.get('seg')}):{e.get('why')}——先测完无认证面(无认证全扫/SSRF/注入探针)再 BLOCKED 要账号")
         parts.append("### 当前 run 状态(harness 记录)\n" + "\n".join(ev_lines))
     ev_dir = job_dir / "evidence"
     if ev_dir.is_dir():
@@ -1045,9 +1062,24 @@ def run_target(
                         runlog(job_dir, "early_stop", {"seg": seg_no, "forced": True})
         # 人工求助检测（BLOCKED 协议）：agent 请求人工输入 → 停止后续段等待线索。
         # digest 只截 RECON_DIGEST 起的尾部，其前的 BLOCKED 块要看 recover / 原始日志尾
-        if BLOCKED_RE.search((digest or "") + "\n" + recover + "\n" + log_text[-4000:]):
-            summary["blocked"] = True
-            runlog(job_dir, "blocked", {"seg": seg_no})
+        blocked_text = (digest or "") + "\n" + recover + "\n" + log_text[-4000:]
+        if BLOCKED_RE.search(blocked_text):
+            if "AUTH_CREDENTIALS" in blocked_text and not _credential_gate_ok(job_dir):
+                # 过早凭证门:无认证面未测完就喊账号 → 打回补测(被拒 2 次强制接受防死循环)
+                denied_n = len(list(job_dir.glob("blocked-deny-*.txt")))
+                if denied_n < 2:
+                    (job_dir / f"blocked-deny-{seg_no}.txt").write_text(
+                        "凭证门被拒(段%s):无认证面未测完(契约/指纹/联动消费缺一不可)——先测完无认证面再要账号\n" % seg_no,
+                        encoding="utf-8")
+                    runlog(job_dir, "blocked_deny",
+                           {"seg": seg_no, "why": "无认证面未测完(契约/指纹/联动消费缺一不可)", "denied_total": denied_n + 1})
+                    log(f"=== [{tag}] 段 {seg_no} 凭证门被拒(无认证面未测完),下一段补测无认证面 ===")
+                else:
+                    summary["blocked"] = True
+                    runlog(job_dir, "blocked", {"seg": seg_no, "forced": True})
+            else:
+                summary["blocked"] = True
+                runlog(job_dir, "blocked", {"seg": seg_no})
 
         # 投降检测(mastermind retry_detector):agent 过早收手 → 下一段强制重试
         if not summary["early_stop"] and not summary["blocked"]:

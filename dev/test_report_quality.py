@@ -261,6 +261,17 @@ try:
     (jd2 / "cookies.txt").write_text("session=x\n", encoding="utf-8")
     ok, why = _early_stop_gate(jd2)
     check("末位测试门:有 cookies.txt 时不要求末位测试", ok, why)
+
+    # 凭证门机械门槛（过早 BLOCKED 打回——无认证面未测完不许要账号）
+    from bigdan import _credential_gate_ok, BLOCKED_RE  # noqa: E402
+    jd5 = tmp2 / "ui-test-0005"
+    (jd5 / "evidence").mkdir(parents=True)
+    check("凭证门:无契约产物 False(不许 BLOCKED 要账号)", not _credential_gate_ok(jd5))
+    (ev3 / "_fingerprint.md").write_text("WAF 状态: 未检测到 WAF 特征\n", encoding="utf-8")  # 前序测试删过,重建
+    check("凭证门:契约+指纹+联动达标 True(可 BLOCKED)",
+          _credential_gate_ok(jd3), "jd3 产物齐全")
+    check("BLOCKED_RE 识别 AUTH_CREDENTIALS",
+          bool(BLOCKED_RE.search("### BLOCKED\ntype: AUTH_CREDENTIALS\n卡点: 需账号")))
 finally:
     shutil.rmtree(tmp2, ignore_errors=True)
 

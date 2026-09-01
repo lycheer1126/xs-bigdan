@@ -748,6 +748,7 @@ def list_jobs() -> list[dict]:
                 "segments_planned": (summary or {}).get("segments_planned"),
                 "early_stop": bool(summary and summary.get("early_stop")),
                 "blocked": bool(summary and summary.get("blocked")),
+                "blocked_hours": _blocked_hours(d) if (summary or {}).get("blocked") else None,
                 "has_user_input": (d / "user_input.md").is_file(),
                 "findings_count": len(findings),
                 "findings_by_status": by_status,
@@ -794,6 +795,30 @@ def _brief_meta(job_dir: Path) -> tuple[str, str]:
     url = mu.group(1).strip() if mu else ""
     note = mn.group(1).strip() if mn else ""
     return url, note
+
+
+def _blocked_hours(job_dir: Path):
+    """BLOCKED 挂起小时数:runlog 最新 blocked 事件 ts 距现在(无事件返回 None)。"""
+    f = job_dir / "runlog.jsonl"
+    if not f.is_file():
+        return None
+    try:
+        lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for ln in reversed(lines):
+        try:
+            rec = json.loads(ln)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("type") == "blocked":
+            ts = rec.get("ts") or ""
+            try:
+                dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
+            except ValueError:
+                return None
+            return round((datetime.now() - dt).total_seconds() / 3600, 1)
+    return None
 
 
 def _last_phase(job_dir: Path) -> str | None:
