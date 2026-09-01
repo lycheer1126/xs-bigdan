@@ -418,6 +418,7 @@ XSModules.tasks = (() => {
             `<button class="btn danger" id="d-stop">停止</button>` :
             `<button class="btn primary" id="d-resume">续跑</button>`}
           ${state === "blocked" ? `<button class="btn" id="d-hint" style="color:var(--warn);border-color:var(--warn)">提供线索</button>` : ""}
+          <button class="btn" id="d-report" title="手动生成报告(中断/半成品任务也出,含降级/附录)">生成报告</button>
           <button class="btn" id="d-open">打开目录</button>
           <button class="btn danger" id="d-del">删除</button>
         </div>
@@ -446,6 +447,12 @@ XSModules.tasks = (() => {
       } catch (e) { XS.toast(e.message, "error"); }
     });
     el.querySelector("#d-hint")?.addEventListener("click", () => openInputModal(detailId));
+    el.querySelector("#d-report")?.addEventListener("click", async () => {
+      try {
+        const r = await XS.api("/api/tasks/report", { method: "POST", json: { job_id: detailId } });
+        XS.toast(`报告已生成: ${r.path}（${r.jobs} 个任务）`, "ok", 5000);
+      } catch (e) { XS.toast("生成报告失败: " + e.message, "error"); }
+    });
     el.querySelector("#d-open")?.addEventListener("click", async () => {
       await XS.api(`/api/tasks/${detailId}/open-dir`, { method: "POST" });
     });

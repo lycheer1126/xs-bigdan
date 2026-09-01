@@ -272,6 +272,42 @@ try:
           _credential_gate_ok(jd3), "jd3 产物齐全")
     check("BLOCKED_RE 识别 AUTH_CREDENTIALS",
           bool(BLOCKED_RE.search("### BLOCKED\ntype: AUTH_CREDENTIALS\n卡点: 需账号")))
+
+    # 门控质量抽查（存在性→内容/结构完整性,防刷产物骗过门）
+    from bigdan import _fingerprint_ok, _linkage_consumed  # noqa: E402
+    jd6 = tmp2 / "ui-test-0006"
+    ev6 = jd6 / "evidence"
+    ev6.mkdir(parents=True)
+    (ev6 / "_fingerprint.md").write_text("ok\n", encoding="utf-8")
+    check("质量抽查:空壳指纹(仅'ok')不过门", not _fingerprint_ok(jd6))
+    (ev6 / "_fingerprint.md").write_text("WAF 状态: 无; 技术栈: Tengine\n", encoding="utf-8")
+    check("质量抽查:含指纹特征词过门", _fingerprint_ok(jd6))
+    (ev6 / "_linkage_results.jsonl").write_text(json.dumps({"hit": False}) + "\n", encoding="utf-8")
+    check("质量抽查:空壳联动记录(无endpoint)不计消费", _linkage_consumed(jd6) == 0)
+    (ev6 / "_linkage_results.jsonl").write_text(
+        json.dumps({"endpoint": "/api/x", "hit": False}) + "\n", encoding="utf-8")
+    check("质量抽查:完整联动记录计消费", _linkage_consumed(jd6) == 1)
+    (ev6 / "_login_probe.txt").write_text("测试\n", encoding="utf-8")
+    check("质量抽查:空壳 _login_probe(无协议测试项)不过", not _login_probe_done(jd6))
+    (ev6 / "_login_probe.txt").write_text("弱口令|无命中|false\n", encoding="utf-8")
+    check("质量抽查:含协议测试项过门", _login_probe_done(jd6))
+
+    # 登录口正则收窄:裸 auth 不算登录口(纯 API 认证端点误伤修复)
+    ep6 = {"_meta": {"analysis_completeness": 0.9},
+           "endpoints": [{"path": "/api/auth/token"}, {"path": "/authorize"},
+                         {"path": "/b"}, {"path": "/c"}]}
+    (ev6 / "_endpoint_params.json").write_text(json.dumps(ep6), encoding="utf-8")
+    check("登录口收窄:/api/auth/token+authorize 不算登录口", not _has_login_surface(jd6))
+    ep6["endpoints"].append({"path": "/login"})
+    (ev6 / "_endpoint_params.json").write_text(json.dumps(ep6), encoding="utf-8")
+    check("登录口收窄:含 /login 仍算登录口", _has_login_surface(jd6))
+
+    # 认证墙场景:真全登录墙目标把 401 测试结果记进联动文件 → 凭证门放行(不浪费 2 段)
+    (ev6 / "_linkage_results.jsonl").write_text("\n".join([
+        json.dumps({"endpoint": "/api/a", "hit": False, "note": "401 需登录"}),
+        json.dumps({"endpoint": "/api/b", "hit": False, "note": "403 认证"}),
+    ]) + "\n", encoding="utf-8")
+    check("认证墙场景:401 测试结果计入有效联动 → 凭证门放行", _credential_gate_ok(jd6))
 finally:
     shutil.rmtree(tmp2, ignore_errors=True)
 

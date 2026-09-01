@@ -38,6 +38,17 @@ class UserInputReq(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+@router.post("/report")
+def make_report(req: dict = None):
+    """手动生成报告:指定 job_id 出单任务报告,不指定出全部(有 summary 的)。
+    修复 webui 停止/进程被杀时任务无报告(半成品结论丢失)的缺口。"""
+    job_id = ((req or {}).get("job_id") or "").strip()
+    try:
+        return core.generate_report(job_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.post("/{job_id}/input")
 def submit_input(job_id: str, req: UserInputReq):
     """人工协作通道：提供线索（测试账号/授权确认/提示），续跑时注入 BRIEF。"""

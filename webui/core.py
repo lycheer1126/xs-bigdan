@@ -821,6 +821,47 @@ def _blocked_hours(job_dir: Path):
     return None
 
 
+def generate_report(job_id: str = "") -> dict:
+    """手动生成报告（修复:webui 停止/进程被杀时 main 未跑到报告生成,任务无报告）。
+
+    job_id 指定单个任务(需有 summary.json);空 = 全部有 summary 的任务。
+    返回 {"path": 报告相对路径, "jobs": 覆盖任务数}。
+    """
+    from core import report as report_mod  # 延迟导入,避免模块环(webui 包内无 report,须从项目根)
+
+    jobs_dir = JOBS_DIR
+    ids: list[str] = []
+    if job_id:
+        sf = jobs_dir / job_id / "summary.json"
+        if not sf.is_file():
+            raise ValueError(f"任务 {job_id} 无 summary.json(未跑完或目录不存在)")
+        ids = [job_id]
+    else:
+        if jobs_dir.is_dir():
+            for d in sorted(jobs_dir.iterdir(), reverse=True):
+                if d.is_dir() and (d / "summary.json").is_file():
+                    ids.append(d.name)
+    if not ids:
+        raise ValueError("没有可生成报告的任务(summary.json 不存在)")
+    summaries = []
+    for i in ids:
+        try:
+            s = json.loads((jobs_dir / i / "summary.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        s.setdefault("id", i)
+        s.setdefault("url", _brief_meta(jobs_dir / i)[0] or i)
+        summaries.append(s)
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    if len(summaries) == 1 and job_id:
+        name = f"report-{job_id}.md"
+    else:
+        name = f"report-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+    report_path = OUTPUTS_DIR / name
+    report_mod.build_report(summaries, report_path, jobs_dir)
+    return {"path": f"runtime/outputs/{name}", "jobs": len(summaries)}
+
+
 def _last_phase(job_dir: Path) -> str | None:
     """最近一次 segment_start 记录的测试阶段（阶段状态机由 bigdan.py 判定并写入 runlog）。"""
     f = job_dir / "runlog.jsonl"

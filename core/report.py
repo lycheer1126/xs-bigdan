@@ -342,8 +342,11 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
                          f"（段上限 {s.get('seg_timeout_sec', '?')}s）")
         for seg in segs:
             err = (seg.get("last_error") or "").strip()
+            seg_findings = seg.get("findings") or []
+            if isinstance(seg_findings, int):  # 旧格式/演示数据:findings 是计数而非标题列表
+                seg_findings = [str(seg_findings)]
             lines.append(f"  - 段{seg['seg']}: exit={seg['exit_code']}{'（超时被终止）' if seg.get('timed_out') else ''} "
-                         f"发现={len(seg.get('findings', []))} digest={'有' if seg.get('digest_saved') else '无'} "
+                         f"发现={len(seg_findings)} digest={'有' if seg.get('digest_saved') else '无'} "
                          f"日志={seg.get('log', '')}"
                          + (f" ⚠️ 失败原因: {err}" if err else ""))
         lines.append("")

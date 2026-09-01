@@ -258,21 +258,25 @@ PHASE_READ_INDEX_COND = {
 # ---------------------------------------------------------------- 阶段状态机（Safe-First 门控）
 
 def _recon_gate(job_dir: Path) -> tuple[bool, str]:
-    """recon 门:契约文件存在 + completeness≥0.8 + 端点≥3（与 methodology 总览同一份清单）。"""
+    """recon 门:契约文件存在 + completeness≥0.8 + 有效端点≥3（与 methodology 总览同一份清单）。
+
+    质量抽查(2026-09 加固):有效端点 = path 非空字符串——空壳端点({"path":""})不算数。
+    """
     ep = job_dir / "evidence" / "_endpoint_params.json"
     if not ep.is_file():
         return False, "契约文件 _endpoint_params.json 不存在(JS 分析未产出)"
     try:
         data = json.loads(ep.read_text(encoding="utf-8", errors="replace"))
         meta = data.get("_meta") or {}
-        n_ep = len(data.get("endpoints") or [])
+        n_ep = sum(1 for e in (data.get("endpoints") or [])
+                   if str(e.get("path") or "").strip())
         comp = meta.get("analysis_completeness", 0)
     except (OSError, json.JSONDecodeError):
         return False, "契约文件存在但解析失败"
     if not isinstance(comp, (int, float)) or comp < 0.8:
         return False, f"契约 completeness={comp}(<0.8,JS 分析未达标)"
     if n_ep < 3:
-        return False, f"契约端点数={n_ep}(<3)"
+        return False, f"契约有效端点={n_ep}(<3)"
     return True, f"契约完整:{n_ep} 端点/completeness={comp}"
 
 
@@ -293,21 +297,26 @@ def _confirmed_count(job_dir: Path) -> int:
 
 
 def _linkage_consumed(job_dir: Path) -> int:
-    """联动消费计数:hit 字段非 None 的结果行数。"""
+    """有效联动消费计数:endpoint 非空 + hit 字段存在 的记录行数。
+
+    质量抽查(2026-09 加固):纯存在性可被空壳记录骗过(如只写 {} 或缺 endpoint),
+    现要求记录结构完整——空壳不算消费。
+    """
     p = job_dir / "evidence" / "_linkage_results.jsonl"
     if not p.is_file():
         return 0
     n = 0
     for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
-            if json.loads(line).get("hit") is not None:
-                n += 1
+            rec = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if rec.get("hit") is not None and str(rec.get("endpoint") or "").strip():
+            n += 1
     return n
 
 
-_LOGIN_SURFACE_RE = re.compile(r"login|signin|register|signup|reset|verify|sms|captcha|passwd|password|auth", re.I)
+_LOGIN_SURFACE_RE = re.compile(r"login|signin|register|signup|reset|verify|sms|captcha|passwd|password", re.I)
 
 
 def _has_login_surface(job_dir: Path) -> bool:
@@ -325,9 +334,23 @@ def _has_login_surface(job_dir: Path) -> bool:
     return False
 
 
+_LOGIN_PROBE_HINT_RE = re.compile(r"弱口令|轰炸|接管|无登录口|login_probe|登录口", re.I)
+
+
 def _login_probe_done(job_dir: Path) -> bool:
-    """登录口末位测试落盘检查:evidence/_login_probe.txt 存在即视为已测(内容由 agent 按协议写)。"""
-    return (job_dir / "evidence" / "_login_probe.txt").is_file()
+    """登录口末位测试落盘质量抽查:evidence/_login_probe.txt 存在且含协议测试项。
+
+    质量抽查(2026-09 加固):存在性可被空壳文件骗过,现要求内容含
+    弱口令/轰炸/接管/无登录口 之一(协议规定格式:每项一行 测试项|结果|是否命中)。
+    """
+    p = job_dir / "evidence" / "_login_probe.txt"
+    if not p.is_file():
+        return False
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return bool(_LOGIN_PROBE_HINT_RE.search(text))
 
 
 def _early_stop_gate(job_dir: Path) -> tuple[bool, str]:
@@ -354,7 +377,8 @@ def _credential_gate_ok(job_dir: Path) -> bool:
 
     mastermind 凭证门定义:无认证全扫(Phase 2 Step 0.6)完成之后才统计"80% 需认证"——
     防止 agent 扫到几个 401 就过早喊账号(无认证面/SSRF/注入探针全没测)。
-    门槛=recon 契约 + 指纹落盘 + 联动消费≥1(与早停门槛前三条一致)。
+    门槛=recon 契约 + 指纹落盘 + 有效联动≥1(含 401 测试结果——agent 把认证墙测试
+    记进联动文件即证明无认证面试过,真全登录墙目标不浪费预算)。
     """
     gate_ok, _ = _recon_gate(job_dir)
     if not gate_ok:
@@ -411,20 +435,29 @@ def infer_phase(job_dir: Path) -> tuple[str, str]:
     return "linkage", f"{gate_why}，值池联动尚未消费"
 
 
+# 指纹文件质量抽查关键词:空壳文件(如仅"ok"/乱写)不许过门
+_FINGERPRINT_HINT_RE = re.compile(
+    r"WAF|waf|技术栈|技术|栈|Server|框架|Tengine|nginx|Nginx|Apache|IIS|Java|PHP|Python|Node|Vue|React|"
+    r"CDN|Cloudflare|指纹|响应头|Cookie|JSESSIONID|PHPSESSID|ASP\.NET", re.I)
+
+
 def _fingerprint_ok(job_dir: Path) -> bool:
-    """指纹落盘检查:evidence/_fingerprint.md 存在且非空——WAF 状态已确认的证据载体。
+    """指纹落盘质量抽查:evidence/_fingerprint.md 存在、非空壳且含技术栈/WAF 类关键词。
 
     README/methodology 一直声称"指纹产物是 linkage 门'WAF 状态已确认'的证据载体"，
     但 infer_phase 从未真正检查——Safe-First 缺口:WAF 未知就进普通测试。
-    现在真正落地:linkage/deep/highrisk 门统一要求指纹落盘。
+    质量抽查(2026-09 加固):纯存在性检查可被空壳文件骗过,现要求内容含指纹特征词。
     """
     fp = job_dir / "evidence" / "_fingerprint.md"
     if not fp.is_file():
         return False
     try:
-        return len(fp.read_text(encoding="utf-8", errors="replace").strip()) > 10
+        text = fp.read_text(encoding="utf-8", errors="replace").strip()
     except OSError:
         return False
+    if len(text) <= 10:
+        return False
+    return bool(_FINGERPRINT_HINT_RE.search(text))
 
 
 def _waf_detected(job_dir: Path) -> bool:
