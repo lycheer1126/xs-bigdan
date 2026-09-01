@@ -201,9 +201,13 @@ def _evidence_urls(text: str) -> List[str]:
 
 
 def _evidence_raw_request(text: str) -> str:
-    """从证据提取完整请求包（HTTP 原始包优先,curl 命令兜底）——SRC 提交 Payload 包。"""
+    """从证据提取完整请求包（HTTP 原始包优先,curl 命令兜底）——SRC 提交 Payload 包。
+
+    容错:请求行支持无 HTTP 版本号(如"请求: POST /path"半格式,旧数据),"请求:"前缀可选。
+    """
     for m in re.finditer(
-            r"(?m)((?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+\s+HTTP/\d(?:\.\d)?\n"
+            r"(?m)(?:^\s*(?:请求|Request|Payload)\s*[:：]\s*)?"
+            r"((?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+(?:\s+HTTP/\d(?:\.\d)?)?\n"
             r"(?:[A-Za-z0-9-]+:\s*[^\n]*\n)*)(?:\n|\Z)", text):
         block = m.group(1).strip()
         if len(block) > 40:
