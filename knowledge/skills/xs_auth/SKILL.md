@@ -102,6 +102,7 @@
 - S7 可逆加密/混淆：自定义加密、base64、简单替换 → 还原明文 → 测：还原后分析参数结构找可控点
 - S8 动态执行：eval/new Function/动态拼接 URL 或查询 → 潜在注入点 → 按白名单相关项定向测试
 - S9 滑块验证码客户端加密可复刻：验证码坐标由前端加密提交（AES/SM4-ECB+PKCS7 常见，CryptoJS 风格），密钥随验证码响应下发（secretKey）→ 图像模板匹配（拼图 alpha 蒙版滑动比对）求缺口 + 复刻加密 → 测：程序化生成 captchaVerification 调业务接口，确认是否单次消费、是否可绕过登录风控/发码防刷（配套脚本：`tools/bin/slider_captcha_solver.py`，用法见「工具参考」）
+  **成本控制（硬约束,防烧 token）**:先探测滑块类型(DOM/iframe/请求特征,1 次)——无感验证(阿里无痕/腾讯风控)→0 次尝试直接放弃;点选文字→0-1 次;缺口/旋转→最多 2 次,每次失败必须换思路(坐标策略/加密方式/入口),禁止同法无限重试;短信验证码发送一次后立即 `BLOCKED:VERIFY_CODE`,禁止反复重发(易触发风控封号);登录/注册流程时间盒 ≤10 分钟超时即弃,转测无认证面不阻塞主流程
 - S10 加密错误信息泄漏：响应报 "Input length must be multiple of 16 when decrypting with padded cipher" / "Given final block not properly padded"（CryptoJS 异常透传）→ 确认算法族与模式（AES-128-ECB 等）→ 用于精确复刻加密实现
 - S11 绑定/存在状态枚举口：发码、重置、token 等端点对「未绑定/登录名不存在」返回独立错误码（如 23009/201129/2011124）→ 响应差异即枚举 → 测：逐个端点确认是否免验证码、是否限速；token 端点类免验证码枚举口优先级最高（可批量）
 - S12 前端 mock 登录（纯前端鉴权）：登录逻辑全在前端实现——Vuex `_login` 硬编码 SET_TOKEN 固定值、`_getInfo` 返回固定角色、路由守卫仅查 token 是否存在，无真实后端登录接口 → 任意伪造 token 可进后台 → 测：登出后手动写入任意 token（localStorage.setItem）直跳受保护路由，确认路由守卫是否仅查存在性；纯前端滑块验证可经 el.__vue__.$parent 链定位 onSuccess 方法直接调用绕过（对应白名单 B3）
