@@ -111,7 +111,7 @@
 - 参数枚举:`tools/wordlists/params.txt` 候选参数(id/uid/url/file/redirect 优先),`xsreq.py` 验证。
 - 未授权访问:去鉴权头直请求业务接口;改方法(GET/POST/PUT/DELETE);非 2xx 触发 method×content-type 组合重试(最多 12 种)。
 - SQLi:数字参数 `1'`/`1 and 1=1`/`1 and 1=2` 差分;字符参数引号报错;观察长度/耗时。**禁止 SQLmap**(SRC 合规)。
-- SSRF:url/redirect/callback 参数试 127.0.0.1、169.254.169.254;OOB 优先 dnslog.cn(最快)。
+- **SSRF(低成本高价值,发现 URL 类参数即测,不等 highrisk)**:url/redirect/callback/image_url 等参数先换 dnslog.cn 子域(按 sink 打标签)→ 有回调=确认,再打云元数据表(169.254.169.254 AWS / metadata.google.internal GCP / 100.100.100.200 阿里云 / metadata.tencentyun.com 腾讯云 / [::ffff:a9fe:a9fe] IPv6 绕过);被黑名单挡 → 十进制/hex/@/302/短链/DNS rebinding 绕过;凭证到手即停(TIER 3)。完整手册 `knowledge/skills/hunt_ssrf/SKILL.md`(OOB 判定门/绕过表/盲打三连)。
 - 文件上传:扩展名黑名单绕过(大小写/双写/空格),验证=内容回显或可访问。
 - 路径穿越:/static/../..//etc/passwd 或编码绕过。
 - **XSS 预检两步法**:①`<s>XSS</s>` 看是否渲染删除线 ②`<img src=x onerror="console.log('xss')">` 看 console。未渲染即停,不深挖。
@@ -141,6 +141,7 @@
   - **PENDING** = 有检测证据但 impact 未证明(如 401 可访问但无敏感数据)
   - **INFO** = 无利用路径(版本泄露/缺 header/目录列表)
 - 确认三问:①能读到什么不该读的数据?②能执行什么不该执行的操作?③Key 能否利用?
+- **SRC 提交价值自检**:明文传输无 MITM 实证 / 无链的 Cookie 属性 / .DS_Store 无内容 / 无法证明可行的无限流 / 设计内风险 → 禁止 CONFIRMED(加固项凑数=报告贬值);没真洞就写"未发现可提交漏洞"。完整清单见 system.md「SRC 提交价值自检」。
 - 响应差异是客观信号:同样输入两次,长度/耗时/内容变化 = 值得深挖。
 - 枚举 miss ≠ 端点不存在:换字典/方法/参数再试一次。
 - 卡住 10 分钟无进展 → 停止该面换面。
@@ -215,6 +216,7 @@
 | knowledge/skills/ai_chat_xss/SKILL.md | AI 对话/聊天类目标(前端 XSS 升级链: self-XSS→存储型→IPC 接管,同构通杀) |
 | knowledge/skills/xs_auth/SKILL.md | 存在登录口/认证逻辑审计需求(账号池注入后优先读:JS审计→定向验证→接管链,含 OAuth/找回密码白名单) |
 | knowledge/skills/business_flow/SKILL.md | BRIEF 注入账号/Cookie 后的登录态业务面(四问框架/寻路四式/返回包地图/XSS冷门落点/钱权益状态机) |
+| knowledge/skills/hunt_ssrf/SKILL.md | 发现 URL 类参数/上传审核转存/头像/低代码调试/Webhook/链接预览时(SSRF 低成本高价值,linkage 阶段优先测:OOB→云元数据→绕过) |
 
 **References(查证资料,特征命中即读):**
 | 文件 | 何时读 |

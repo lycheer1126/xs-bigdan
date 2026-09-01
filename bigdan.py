@@ -225,6 +225,7 @@ PHASE_READ_INDEX = {
         ("references/decision-trees/README.md", "参数特征命中→先读索引再精读对应§决策树小文件(29棵,防上下文泛滥)"),
         ("skills/xs_auth/SKILL.md", "BRIEF 注入了测试账号时:登录口逻辑审计手册(JS审计→定向验证→接管链)"),
         ("skills/business_flow/SKILL.md", "BRIEF 注入了账号/Cookie 时:登录态功能点遍历(四问框架+寻路四式+返回包地图)"),
+        ("skills/hunt_ssrf/SKILL.md", "SSRF 狩猎手册:URL类参数优先测(低成本高价值,OOB确认→云元数据表→绕过变体→盲打三连)"),
     ],
     "deep": [  # 🟡 条件阶段: JWT/加密/端点榨干（无 JWT 且无加密体→跳过并写 digest）
         ("skills/jwt_attack/SKILL.md", "发现 JWT 时:全攻击链(alg:none/弱密钥/kid/RS256→HS256)"),
@@ -606,8 +607,9 @@ def extract_digest(log_text: str) -> Optional[str]:
     if not m:
         return None
     body = m.group(1)
-    # 剥离 harness 行前缀（`[tag] ` 与 `# [tag] ` 两种形态）
-    body = re.sub(r"(?m)^(?:# )?\[[^\]]+\] ", "", body)
+    # 剥离 harness/镜像行前缀——日志里每行是 `[时间戳] [tag] 内容`(甚至 `# [时间] [tag] 内容`),
+    # 旧版只剥一层导致 digest 残留 [tag] 前缀、报告难读。这里剥掉行首连续多个 [xxx] 前缀。
+    body = re.sub(r"(?m)^(?:# )?(?:\[[^\]]+\]\s*)+", "", body)
     # 过滤 heartbeat 与收尾控制行
     body = re.sub(r"(?m)^(?:# )?heartbeat .*$", "", body)
     body = re.sub(r"(?m)^# --- .*$", "", body)
@@ -669,17 +671,47 @@ def read_final_assistant_text(job_dir: Path, min_mtime: float = 0.0) -> str:
 
 # ---------------------------------------------------------------- FINDING 提取
 
-FINDING_RE = re.compile(r"(?:^|\])\s*`{0,2}\s*FINDING:\s*(.+?)`{0,2}\s*$", re.M)
+# FINDING 行可能形态: 独占一行 / [tag] 前缀行 / 被 agent 包进 echo "FINDING: ..." 的 bash
+# 命令(前面是引号,且镜像显示被截断为 ...|CONFI…)。旧正则要求 FINDING 前是行首或 ]，
+# 引号包裹形态直接漏提取 → 证据在而报告 0 发现。新正则: 行内任意位置匹配,
+# 捕获到 引号/反引号/行尾 为止;截断的 status 由 extract_findings 归一化兜底。
+FINDING_RE = re.compile(r"""FINDING:\s*(.+?)(?:"|`|$|(?=FINDING:))""", re.M | re.I)
+
+# FINDING 行 file 字段硬校验：NN-英文名称.txt（仅字母/数字/下划线/连字符/点，无空格无标点）
+_FINDING_FILE_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,80}\.txt$")
+
+
+def _norm_title(t: str) -> str:
+    """标题归一化（去重用）：去尾部省略号/截断符、去首尾空白、压缩连续空白。"""
+    t = re.sub(r"[….]+$", "", (t or "").strip())
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _finding_key(f: dict) -> tuple:
+    """去重键：类型 + 归一化标题（file 字段不参与——截断/污染的副本必须能命中同一条）。"""
+    return (f.get("type") or "").strip(), _norm_title(f.get("title") or "")
+
+
+def _finding_rank(f: dict) -> int:
+    """同键冲突时的保留优先级：CONFIRMED > PENDING > INFO，同状态时有证据文件者优先。"""
+    st = (f.get("status") or "CONFIRMED").upper()
+    rank = {"CONFIRMED": 3, "PENDING": 2, "INFO": 1}.get(st, 0)
+    return rank * 2 + (1 if f.get("file") else 0)
 
 
 def extract_findings(log_text: str) -> List[dict]:
     """提取 FINDING: type|title|file|status 行；type/title 为空的脏行丢弃（宁缺勿滥）。
 
     反引号容错：agent 常把整行包进 `` ` ``（行内代码），老版正则因此漏提取。
+    硬校验（2026-09 加固）：标题截断（含 …）或超长、file 字段不合文件名规范
+    （如叙述句混入、带空格/中文标点）→ 整行丢弃，防止脏条目污染报告与去重。
     """
     out: List[dict] = []
     for m in FINDING_RE.finditer(log_text):
-        parts = [p.strip().strip("`").strip() for p in m.group(1).split("|")]
+        raw = m.group(1)
+        if len(raw) > 300:  # 行内误抓长文本(如 digest 叙述)直接丢弃
+            continue
+        parts = [p.strip().strip("`").strip() for p in raw.split("|")]
         f = {
             "type": parts[0] if len(parts) > 0 else "",
             "title": parts[1] if len(parts) > 1 else "",
@@ -688,8 +720,14 @@ def extract_findings(log_text: str) -> List[dict]:
         }
         if not f["type"] or not f["title"]:
             continue
+        if "…" in f["title"] or len(f["title"]) > 120:  # 截断标题 = 脏行
+            continue
+        if not _FINDING_FILE_RE.match(f["file"]):  # 叙述句/空格/标点混入 file 字段 = 脏行
+            continue
         if f["status"] not in ("CONFIRMED", "PENDING", "INFO"):
-            f["status"] = "CONFIRMED"
+            if len(parts) > 3:  # 显式 status 但非法（粘行/污染）→ 脏行丢弃，不做默认归一化
+                continue
+            f["status"] = "CONFIRMED"  # status 字段缺失 → 默认
         if f not in out:
             out.append(f)
     return out
@@ -842,10 +880,10 @@ def run_target(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             log_path=log_path,
-            provider=os.environ.get("BIGDAN_LLM_PROVIDER", "deepseek"),
+            provider=(os.environ.get("BIGDAN_LLM_PROVIDER") or "deepseek"),
             model=model,
             api_key=os.environ.get("BIGDAN_LLM_KEY") or resolve_llm_key() or None,
-            thinking=os.environ.get("BIGDAN_LLM_THINKING", "medium"),
+            thinking=(os.environ.get("BIGDAN_LLM_THINKING") or "medium"),
             timeout_sec=seg_to,
             session_name=f"{tag}-seg{seg_no}",
             job_tag=tag,
@@ -857,14 +895,19 @@ def run_target(
         # min_mtime 防陈旧镜像：本段 pi 没启动成功时不该用上一段的交接
         recover = read_final_assistant_text(job_dir, min_mtime=seg_start_epoch - 5)
 
-        # 提取本段发现（按 类型|标题|证据 去重后合并，保留上一轮/前几段的历史发现）
+        # 提取本段发现（按 类型|归一化标题 去重后合并，保留上一轮/前几段的历史发现；
+        # 同键冲突保留高优先级条目——标题截断/字段污染的重复登记命中同一条而非新增）
         seg_findings = extract_findings(log_text)
         for f in extract_findings(recover):
             if f not in seg_findings:
                 seg_findings.append(f)
         for f in seg_findings:
-            key = (f["type"], f["title"], f["file"])
-            if all((x["type"], x["title"], x["file"]) != key for x in summary["findings"]):
+            key = _finding_key(f)
+            existing = next((x for x in summary["findings"] if _finding_key(x) == key), None)
+            if existing is None:
+                summary["findings"].append(f)
+            elif _finding_rank(f) > _finding_rank(existing):
+                summary["findings"].remove(existing)
                 summary["findings"].append(f)
             runlog(job_dir, "finding", {"seg": seg_no, "vuln_type": f["type"], "title": f["title"], "file": f["file"], "status": f.get("status", "CONFIRMED")})
 
@@ -941,7 +984,7 @@ def main() -> int:
     ap.add_argument("--job-timeout", type=int, default=DEFAULT_JOB_TIMEOUT, help=f"每目标总预算秒，超时停止该目标（默认 {DEFAULT_JOB_TIMEOUT}=60分钟）")
     ap.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY, help=f"同时测试的目标数 fill-slot（默认 {DEFAULT_CONCURRENCY}=串行）")
     ap.add_argument("--credentials", default=CREDENTIALS_FILE, help=f"测试账号池文件（默认 {CREDENTIALS_FILE}，不存在则跳过）")
-    ap.add_argument("--model", default=os.environ.get("BIGDAN_LLM_MODEL", "deepseek-v4-flash"), help="LLM 模型")
+    ap.add_argument("--model", default=(os.environ.get("BIGDAN_LLM_MODEL") or "deepseek-v4-flash"), help="LLM 模型")
     ap.add_argument("--dry-run", action="store_true", help="只打印执行计划")
     args = ap.parse_args()
 
@@ -971,7 +1014,7 @@ def main() -> int:
         log(f"测试账号: {len(creds)} 条（{cred_path}），将注入命中目标的 BRIEF")
 
     log(f"xs-bigdan v{VERSION} | 目标数={len(targets)} | 白名单={scope}")
-    log(f"模型={args.model} provider={os.environ.get('BIGDAN_LLM_PROVIDER', 'deepseek')} "
+    log(f"模型={args.model} provider={os.environ.get('BIGDAN_LLM_PROVIDER') or 'deepseek'} "
         f"key_set={bool(os.environ.get('BIGDAN_LLM_KEY') or resolve_llm_key())}")
     log(f"时间模型: 每目标总预算 {job_timeout}s ({job_timeout // 60}min) | 每段上限 {seg_timeout}s | "
         f"段数 {args.segments} | 并发 {workers}")
@@ -1048,8 +1091,9 @@ def main() -> int:
     else:
         site_part = f"multi-{len(sites)}"
         note_part = ""
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    name = f"report-{site_part}" + (f"-{note_part}" if note_part else "") + f"-{stamp}"
+    # 报告名固定(不带时间戳):续跑/重跑覆盖同站点报告,webui 历史列表永远指向最新内容。
+    # 旧带时间戳的报告文件保留在 outputs/ 可手动归档。
+    name = f"report-{site_part}" + (f"-{note_part}" if note_part else "")
     report_path = OUTPUTS_DIR / f"{name}.md"
     build_report(all_summaries, report_path, JOBS_DIR)
     log(f"[+] 报告已生成: {report_path}")

@@ -441,6 +441,17 @@ def _run_pi_session_once(
 ) -> int:
     work_dir.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    # 防线: --api-key 已设置但 model 为空时,pi 只会报模糊错误
+    # ("--api-key requires a model..."),无法定位根因。这里直接给出可归档的
+    # 根因行(extract_last_error 可抓)并快速失败,不空耗段预算。
+    if api_key and not model:
+        _append_log_note(
+            log_path,
+            "harness error: --api-key 已设置但 model 为空(检查 .env 的 BIGDAN_LLM_MODEL "
+            "是否缺失或为空白值),--model 未传给 pi,本段直接失败",
+            tag=job_tag or str(work_dir.name),
+        )
+        return 1
     # absolute path: pi resolves relative --session-dir against its own cwd,
     # which would nest the jsonl inside work_dir/jobs/<id>/ and break the mirror
     session_dir = work_dir.resolve() / ".pi-sessions"

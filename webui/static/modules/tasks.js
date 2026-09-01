@@ -11,6 +11,29 @@ XSModules.tasks = (() => {
   let detailTab = "summary";
   let logAuto = true;
   let logFile = "";
+  let groupFilter = "";  // 看板分组筛选: ""=全部, "__none__"=未分组, 组名=只看该组
+
+  /* 漏洞类型英文 → 中文（看板/详情展示；已是中文的原样透传） */
+  const VULN_CN = {
+    "open redirect": "开放重定向", "info disclosure": "信息泄露", "information disclosure": "信息泄露",
+    "user enumeration": "用户枚举", "sensitiveinfodisclosure": "敏感信息泄露",
+    "ssrf": "SSRF", "sqli": "SQL注入", "sql injection": "SQL注入", "xss": "XSS",
+    "idor": "越权", "csrf": "CSRF", "rce": "命令执行", "arbitrary file read": "任意文件读取",
+    "unauthorized": "未授权访问", "weak password": "弱口令", "credential leak": "凭据泄露",
+    "cleartext": "明文传输", "missing rate limit": "缺少速率限制",
+  };
+
+  function vulnCN(t) {
+    const k = String(t || "").trim();
+    if (!k) return "未知";
+    return VULN_CN[k.toLowerCase()] || k;
+  }
+
+  function shortDomain(id) { return String(id).replace(/^ui-/, "").replace(/-\d{8}-\d{6}$/, ""); }
+  function taskDate(id) {
+    const m = String(id).match(/-(\d{4})(\d{2})(\d{2})-\d{6}$/);
+    return m ? `${+m[2]}月${+m[3]}日` : "";
+  }
 
   /* ---------- 列表页 ---------- */
 
@@ -18,11 +41,13 @@ XSModules.tasks = (() => {
     return `<div class="stat ${cls}"><div class="num">${num}</div><div class="lbl">${label}</div></div>`;
   }
 
-  function cardHTML(j) {
-    const tags = Object.entries(j.findings_by_type || {})
-      .map(([t, n]) => `<span class="tag">${XS.esc(t)}×${n}</span>`).join("");
+  function cardHTML(j, groups) {
+    const vulns = Object.entries(j.findings_by_type || {})
+      .map(([t, n]) => `<span class="tag vuln">${XS.esc(vulnCN(t))}×${n}</span>`).join("");
     const pct = j.segments_planned
       ? Math.round((j.segments_ran / j.segments_planned) * 100) : 0;
+    const grpOpts = `<option value="">未分组</option>` +
+      groups.map(g => `<option value="${XS.esc(g.name)}" ${j.group === g.name ? "selected" : ""}>${XS.esc(g.name)}</option>`).join("");
     const buttons = `
       <button class="btn sm detail-btn" data-id="${XS.esc(j.id)}">详情</button>
       ${j.state === "running" ? `
@@ -33,36 +58,53 @@ XSModules.tasks = (() => {
     return `
       <div class="card" data-id="${XS.esc(j.id)}">
         <div class="card-top">
-          <span class="card-id">${XS.esc(j.id)}</span>
+          ${taskDate(j.id) ? `<span class="chip-date">${XS.esc(taskDate(j.id))}</span>` : ""}
+          ${j.group ? `<span class="chip-grp">📁 ${XS.esc(j.group)}</span>` : ""}
           ${XS.stateBadge(j.state)}
           <span class="spacer" style="flex:1"></span>
-          <span class="card-meta">${j.findings_count} 发现</span>
+          <span class="card-meta">${j.findings_count} 个发现</span>
         </div>
+        <div class="card-domain">${XS.esc(shortDomain(j.id))}</div>
         <div class="card-url">${XS.esc(j.url)}</div>
         ${j.note ? `<div class="card-note">${XS.esc(j.note)}</div>` : ""}
+        <div class="card-vulns">${vulns || `<span class="muted" style="font-size:11.5px;color:var(--txt-faint)">暂无漏洞发现</span>`}</div>
         ${j.segments_planned ? `
         <div class="progress"><i style="width:${pct}%"></i></div>
         <div class="card-meta">段 ${j.segments_ran}/${j.segments_planned} · ${XS.fmtDur(j.elapsed_sec)}
           ${j.early_stop ? "· Agent 建议结束" : ""}</div>` : `
         <div class="card-meta">${j.started_at || "未开始"} ${j.ended_at ? "· " + j.ended_at : ""}</div>`}
         <div class="card-tags">
-          ${j.phase ? `<span class="tag" style="color:var(--accent);border-color:var(--accent)"
-            title="阶段状态机判定（Safe-First 产物门控）">${XS.esc(j.phase)}</span>` : ""}
-          ${tags || ""}
           ${j.errors ? `<span class="tag" style="color:var(--danger);border-color:var(--danger)"
             title="${XS.esc(j.last_error || "存在异常退出的段，详情页 SUMMARY 可见根因")}">⚠️ 失败×${j.errors}</span>` : ""}
-          ${j.has_digest ? `<span class="tag ok">digest</span>` : ""}
-          ${j.evidence_count ? `<span class="tag">evidence ${j.evidence_count}</span>` : ""}
         </div>
-        <div class="card-actions">${buttons}</div>
+        <div class="card-actions">
+          <select class="grp-sel" data-id="${XS.esc(j.id)}" title="把任务移入分组">
+            ${grpOpts}
+          </select>
+          ${buttons}
+        </div>
       </div>`;
   }
 
   async function renderList() {
     if (!el || detailId) return;
     try {
-      const data = await XS.api("/api/tasks");
+      const [data, grp] = await Promise.all([XS.api("/api/tasks"), XS.api("/api/groups")]);
       const s = data.stats;
+      const groups = grp.groups || [];
+      let jobs = data.jobs;
+      if (groupFilter === "__none__") jobs = jobs.filter(j => !j.group);
+      else if (groupFilter) jobs = jobs.filter(j => j.group === groupFilter);
+      const grpBar = `
+        <div class="grp-bar">
+          <span class="grp-title">分组</span>
+          <span class="grp-chip ${!groupFilter ? "on" : ""}" data-grp="">全部(${data.jobs.length})</span>
+          <span class="grp-chip ${groupFilter === "__none__" ? "on" : ""}" data-grp="__none__">未分组</span>
+          ${groups.map(g => `<span class="grp-chip ${groupFilter === g.name ? "on" : ""}"
+            data-grp="${XS.esc(g.name)}" title="点击只看该组">${XS.esc(g.name)}(${g.count})</span>`).join("")}
+          <button class="btn sm" id="btn-newgrp" title="新建分组，把同厂商/同批目标归到一起">＋ 新建组</button>
+          ${groupFilter ? `<span class="grp-tip">当前只看「${XS.esc(groupFilter === "__none__" ? "未分组" : groupFilter)}」</span>` : ""}
+        </div>`;
       el.innerHTML = `
         <div class="page-head">
           <h1>任务</h1>
@@ -84,9 +126,10 @@ XSModules.tasks = (() => {
           ${statCard("异常退出", s.errors || 0, s.errors ? "red" : "")}
           ${statCard("发现数", s.findings, "")}
         </div>
+        ${grpBar}
         <div class="cards">
-          ${data.jobs.length ? data.jobs.map(cardHTML).join("") :
-            `<div class="empty" style="grid-column:1/-1">暂无任务 — 点击右上角「新建任务」开始</div>`}
+          ${jobs.length ? jobs.map(j => cardHTML(j, groups)).join("") :
+            `<div class="empty" style="grid-column:1/-1">${groupFilter ? "该分组暂无任务 — 点「全部」查看其它" : "暂无任务 — 点击右上角「新建任务」开始"}</div>`}
         </div>`;
       bindList();
     } catch (e) { XS.toast("列表刷新失败: " + e.message, "error"); }
@@ -118,9 +161,77 @@ XSModules.tasks = (() => {
     });
   }
 
+  async function openGroupModal() {
+    let groups = [];
+    try { groups = (await XS.api("/api/groups")).groups || []; } catch { /* 列表加载失败不阻塞 */ }
+    const mask = XS.modal(`
+      <div class="modal-head">管理分组 <span class="x">✕</span></div>
+      <div class="modal-body">
+        <p class="muted" style="font-size:12.5px;margin-bottom:8px">
+          把同一厂商 / 同一批次的目标归到一组，看板按组过滤查看。任务卡片上的
+          分组下拉可随时把任务移入 / 移出组。</p>
+        <div id="grp-list" style="margin-bottom:10px">
+          ${groups.map(g => `
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--line);
+              border-radius:8px;margin-bottom:6px;font-size:13px">
+              <span class="chip-grp">📁 ${XS.esc(g.name)}</span>
+              <span class="muted" style="font-size:11.5px">${g.count} 个任务</span>
+              <span class="spacer" style="flex:1"></span>
+              <button class="btn sm danger del-grp" data-grp="${XS.esc(g.name)}">删除</button>
+            </div>`).join("") || `<div class="muted" style="font-size:12px;margin-bottom:6px">还没有分组</div>`}
+        </div>
+        <div style="display:flex;gap:8px">
+          <input id="grp-name" placeholder="新组名，如: 货拉拉、58、银联SRC" maxlength="30" autocomplete="off"
+            style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--line);font-size:13px">
+          <button class="btn primary" id="grp-ok" style="flex:0 0 auto">新建</button>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="grp-cancel">关闭</button>
+      </div>`);
+    mask.querySelector("#grp-cancel").addEventListener("click", () => mask.hidden = true);
+    mask.querySelector("#grp-ok").addEventListener("click", async () => {
+      const name = mask.querySelector("#grp-name").value.trim();
+      if (!name) { XS.toast("请输入组名", "error"); return; }
+      try {
+        await XS.api("/api/groups", { method: "POST", json: { name } });
+        XS.toast(`已创建分组「${name}」`, "ok");
+        mask.hidden = true;
+        renderList();
+      } catch (e) { XS.toast("创建失败: " + e.message, "error"); }
+    });
+    mask.querySelectorAll(".del-grp").forEach(b =>
+      b.addEventListener("click", async () => {
+        const name = b.dataset.grp;
+        if (!confirm(`删除分组「${name}」？组内任务不会删除，只是变回未分组。`)) return;
+        try {
+          await XS.api(`/api/groups/${encodeURIComponent(name)}`, { method: "DELETE" });
+          XS.toast(`已删除分组「${name}」`, "ok");
+          if (groupFilter === name) groupFilter = "";
+          mask.hidden = true;
+          renderList();
+        } catch (e) { XS.toast("删除失败: " + e.message, "error"); }
+      }));
+  }
+
   function bindList() {
     el.querySelector("#btn-refresh")?.addEventListener("click", renderList);
     el.querySelector("#btn-new")?.addEventListener("click", openNewModal);
+    el.querySelector("#btn-newgrp")?.addEventListener("click", openGroupModal);
+    el.querySelectorAll(".grp-chip").forEach(c =>
+      c.addEventListener("click", () => {
+        groupFilter = c.dataset.grp || "";
+        renderList();
+      }));
+    el.querySelectorAll(".grp-sel").forEach(s =>
+      s.addEventListener("change", async () => {
+        const jobId = s.dataset.id, grp = s.value;
+        try {
+          await XS.api("/api/groups/assign", { method: "POST", json: { job_id: jobId, group: grp } });
+          XS.toast(grp ? `已移入「${grp}」` : "已移出分组", "ok");
+          renderList();
+        } catch (e) { XS.toast("分组失败: " + e.message, "error"); renderList(); }
+      }));
     el.querySelector("#btn-clearq")?.addEventListener("click", async () => {
       if (!confirm(`取消全部排队中的任务？（正在运行的不受影响）`)) return;
       try {
@@ -181,6 +292,10 @@ XSModules.tasks = (() => {
         <div class="field">
           <label>备注（可选，应用于本批所有目标）</label>
           <input id="nf-note" placeholder="如: 某SRC已授权资产" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>分组（可选，把本批任务归入同一组；填新名字即自动建组）</label>
+          <input id="nf-group" placeholder="如: 货拉拉" maxlength="30" autocomplete="off">
         </div>
         <div class="field">
           <label>Cookie（可选，每个框一个账号的登录态，应用于本批所有目标并自动按站点隔离）
@@ -255,6 +370,7 @@ XSModules.tasks = (() => {
           json: {
             urls_text: text,
             note: mask.querySelector("#nf-note").value.trim(),
+            group: mask.querySelector("#nf-group")?.value.trim() || "",
             cookie: [...cookieList.querySelectorAll(".nf-cookie-input")]
               .map(t => t.value.trim()).filter(Boolean).join("\n"),
             intent: mask.querySelector("#nf-intent").value.trim(),
@@ -363,6 +479,15 @@ XSModules.tasks = (() => {
         ${data.user_input ? `
         <div class="panel"><div class="panel-head">人工线索（已提供，续跑时注入简报）</div>
           <div class="panel-body"><pre class="code">${XS.esc(data.user_input)}</pre></div></div>` : ""}
+        ${(s.findings || []).length ? `
+        <div class="panel"><div class="panel-head">漏洞发现（${(s.findings || []).length}）</div>
+          <div class="panel-body"><table class="kv">
+            ${(s.findings || []).map((f, i) =>
+              `<tr><td>#${i + 1}</td>
+                <td><b>${XS.esc(vulnCN(f.type || ""))}</b> · ${XS.esc(f.title || "")}</td>
+                <td class="mono">${XS.esc(f.status || "CONFIRMED")}</td>
+                <td class="mono">${XS.esc(f.file || "")}</td></tr>`).join("")}
+          </table></div></div>` : ""}
         <div class="panel"><div class="panel-head">基本信息</div><div class="panel-body">
           <table class="kv">${rows.map(([k, v]) =>
             `<tr><td>${k}</td><td class="mono">${XS.esc(String(v ?? "-"))}</td></tr>`).join("")}

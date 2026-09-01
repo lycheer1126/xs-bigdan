@@ -24,9 +24,10 @@ sudo "$ROOT/.venv/bin/playwright" install-deps chromium \
      libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
      libxrandr2 libgbm1 libasound2
 
-say "4/8 Node.js 20 + pi agent"
-if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -c2- | cut -d. -f1)" -lt 18 ]; then
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+say "4/8 Node.js 22 + pi agent"
+# pi 0.84.1 要求 node>=22.19.0(undici 依赖 node:webidl,Node 20 会崩)——判断 <22 才装
+if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -c2- | cut -d. -f1)" -lt 22 ]; then
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
   sudo apt install -y nodejs
 fi
 npm config set registry https://registry.npmmirror.com

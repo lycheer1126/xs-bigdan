@@ -26,6 +26,7 @@ class NewTaskReq(BaseModel):
     intent: str = Field(default="", max_length=4000)
     job_timeout: int = Field(default=core.DEFAULT_JOB_TIMEOUT, ge=90, le=14400)
     segments: int = Field(default=core.DEFAULT_SEGMENTS, ge=1, le=10)
+    group: str = Field(default="", max_length=30)
 
 
 class ResumeReq(BaseModel):
@@ -69,16 +70,21 @@ class BatchTaskReq(BaseModel):
     intent: str = Field(default="", max_length=4000)
     job_timeout: int = Field(default=core.DEFAULT_JOB_TIMEOUT, ge=90, le=14400)
     segments: int = Field(default=core.DEFAULT_SEGMENTS, ge=1, le=10)
+    group: str = Field(default="", max_length=30)
 
 
 @router.post("/batch")
 def batch_create(req: BatchTaskReq):
     """批量新建：每行一个 URL（可整批粘贴），自动生成 id，按粘贴顺序入队串行执行（绝不并行）。"""
     try:
-        return core.enqueue_tasks(req.urls_text, req.note, req.job_timeout, req.segments,
-                                  req.cookie, req.intent)
+        r = core.enqueue_tasks(req.urls_text, req.note, req.job_timeout, req.segments,
+                               req.cookie, req.intent)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    if req.group.strip():
+        for i in r.get("ids", []):
+            core.assign_job(i, req.group.strip())
+    return r
 
 
 @router.post("/queue/clear")

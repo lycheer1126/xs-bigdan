@@ -27,6 +27,7 @@ TARGETS_FILE = PROJECT_ROOT / "targets.txt"
 WEBUI_DIR = PROJECT_ROOT / "runtime" / ".webui"
 PROCS_FILE = WEBUI_DIR / "procs.json"
 QUEUE_FILE = WEBUI_DIR / "queue.json"
+GROUPS_FILE = WEBUI_DIR / "groups.json"
 BIGDAN_ENTRY = PROJECT_ROOT / "bigdan.py"
 
 DEFAULT_JOB_TIMEOUT = 3600  # 与 bigdan.py 默认一致(60 分钟，真实目标侦察+验证以小时计)
@@ -605,6 +606,91 @@ def _classify(job_id: str, summary: dict | None, running_ids: set) -> str:
     return "created"
 
 
+# ---------------------------------------------------------------- 任务分组（手动归类，看板按组过滤）
+
+_groups_lock = threading.RLock()
+_RESERVED_GROUP_NAMES = ("全部", "未分组")
+
+
+def _load_groups_raw() -> dict:
+    if GROUPS_FILE.is_file():
+        try:
+            return json.loads(GROUPS_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+    return {}
+
+
+def _save_groups_raw(data: dict) -> None:
+    WEBUI_DIR.mkdir(parents=True, exist_ok=True)
+    GROUPS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def list_groups() -> dict:
+    """全部组 + 成员任务ID列表（按成员数降序，便于看板展示）。"""
+    raw = _load_groups_raw().get("groups") or {}
+    items = []
+    for k, v in raw.items():
+        if not isinstance(v, list):
+            continue  # groups.json 被手工改坏时跳过，不崩看板
+        alive = [i for i in v if (JOBS_DIR / i).is_dir()]
+        items.append({"name": k, "jobs": alive, "count": len(alive)})
+    items.sort(key=lambda g: -g["count"])
+    return {"groups": items}
+
+
+def create_group(name: str) -> dict:
+    name = (name or "").strip()
+    if not name or len(name) > 30:
+        raise ValueError("组名需为 1-30 个字符")
+    if name in _RESERVED_GROUP_NAMES:
+        raise ValueError(f"「{name}」为保留词，不能用作组名")
+    with _groups_lock:
+        raw = _load_groups_raw()
+        groups = raw.setdefault("groups", {})
+        if name in groups:
+            raise ValueError(f"组已存在: {name}")
+        groups[name] = []
+        _save_groups_raw(raw)
+    return {"name": name, "count": 0}
+
+
+def delete_group(name: str) -> None:
+    with _groups_lock:
+        raw = _load_groups_raw()
+        groups = raw.setdefault("groups", {})
+        if name in groups:
+            del groups[name]
+            _save_groups_raw(raw)
+
+
+def assign_job(job_id: str, group: str) -> None:
+    """任务放入指定组（一个任务唯一属于一组，重复分配自动换组）；group 为空 = 取消分组。"""
+    if not valid_job_id(job_id):
+        raise ValueError("非法任务 ID")
+    group = (group or "").strip()
+    if group and (len(group) > 30 or group in _RESERVED_GROUP_NAMES):
+        raise ValueError("非法组名")
+    with _groups_lock:
+        raw = _load_groups_raw()
+        groups = raw.setdefault("groups", {})
+        for g, ids in groups.items():
+            if job_id in ids:
+                ids.remove(job_id)
+        if group:
+            groups.setdefault(group, []).append(job_id)
+        _save_groups_raw(raw)
+
+
+def group_of(job_id: str) -> str:
+    """任务所属组名（未分组返回空串）。"""
+    groups = _load_groups_raw().get("groups") or {}
+    for g, ids in groups.items():
+        if job_id in ids:
+            return g
+    return ""
+
+
 def list_jobs() -> list[dict]:
     """扫描 runtime/jobs/，返回任务卡片数据（含统计分类计数）。"""
     running = set(running_pids().keys())
@@ -654,6 +740,7 @@ def list_jobs() -> list[dict]:
                 "state": state,
                 "url": url,
                 "note": note,
+                "group": group_of(d.name),
                 "started_at": (summary or {}).get("started_at", ""),
                 "ended_at": (summary or {}).get("ended_at", ""),
                 "elapsed_sec": (summary or {}).get("elapsed_sec"),
@@ -1081,6 +1168,31 @@ def llm_profiles_view() -> dict:
     }
 
 
+def _register_provider_models(base: str, provider: str, model: str) -> None:
+    """把档位 provider 注册进 pi 的 ~/.pi/agent/models.json(幂等合并)。
+
+    pi 只认 models.json 里注册过的 provider;本函数在 webui 保存档位时自动调用,
+    新环境无需再手动注册。只覆盖同名 provider 条目,不破坏其他 provider。
+    """
+    try:
+        mp = Path.home() / ".pi" / "agent" / "models.json"
+        data = json.loads(mp.read_text(encoding="utf-8")) if mp.is_file() else {"providers": {}}
+        data.setdefault("providers", {})
+        data["providers"][provider] = {
+            "baseUrl": base,
+            "api": "openai-completions",
+            "models": [{
+                "id": model, "name": model, "reasoning": True, "input": ["text"],
+                "contextWindow": 128000, "maxTokens": 8192,
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+            }],
+        }
+        mp.parent.mkdir(parents=True, exist_ok=True)
+        mp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:  # noqa: BLE001 — 注册失败不阻断档位保存
+        pass
+
+
 def save_llm_profiles(active: str, profiles: list) -> dict:
     """保存档位列表 + 激活档位。
 
@@ -1107,6 +1219,16 @@ def save_llm_profiles(active: str, profiles: list) -> dict:
         active = cleaned[0]["name"]
     _write_llm_profiles({"active": active, "profiles": cleaned})
     act = next(p for p in cleaned if p["name"] == active)
+    # 空 provider/model 会被同步成 .env 空值(BIGDAN_LLM_PROVIDER= / BIGDAN_LLM_MODEL=),
+    # 新任务 spawn 的 bigdan 拿到空 model 不传 --model,pi 报模糊错误
+    # "--api-key requires a model"。源头拒绝:保存失败比写坏配置好。
+    missing = [f for f in ("provider", "model") if not act.get(f)]
+    if missing:
+        raise ValueError(f"激活档位「{active}」的 {', '.join(missing)} 为空,请填写完整后再保存")
+    # 治本:把档位 provider 注册进 pi 的 models.json——pi 只认 models.json 里有的
+    # provider(webui 只写 .env 的话,新环境的 pi 会报 Unknown provider)。幂等合并,
+    # 不破坏已有条目;失败静默,不阻断保存。
+    _register_provider_models(act.get("base", ""), act["provider"], act["model"])
     resolved = {**_read_dotenv(), **os.environ}.get(act["key_env"], "")
     sync = {f"BIGDAN_LLM_{k.upper()}": act[k] for k in _PROFILE_FIELDS}
     sync["BIGDAN_LLM_KEY"] = resolved

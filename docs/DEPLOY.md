@@ -31,8 +31,9 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 playwright install chromium
 playwright install-deps chromium   # 需要 sudo
 
-# Node.js ≥18（pi agent 底座）
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs
+# Node.js ≥22.19（pi agent 底座；pi 0.84.1 要求 >=22.19.0，Node 20 下 undici 报
+# webidl.markAsUncloneable 崩溃——务必用 22.x 而非 20.x）
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs
 npm install -g @earendil-works/pi-coding-agent
 
 # ffuf Linux 版（Windows 的 ffuf.exe 在 Linux 不可用；probe_tools 按名字探测）
