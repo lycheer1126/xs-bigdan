@@ -9,6 +9,7 @@
           的关键行原文——保留真实形态才能测出当年踩过的坑。
 """
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -203,14 +204,43 @@ try:
     check("指纹门:指纹缺失 回 recon 补门(不进普通测试)", phase == "recon", f"phase={phase} ({basis})")
 
     # bypass 正式化 + data_not_public 机械检查
-    from bigdan import PHASE_READ_INDEX  # noqa: E402
+    from bigdan import PHASE_READ_INDEX, PHASE_READ_INDEX_COND, write_brief  # noqa: E402
     check("Phase4正式化:linkage 读取索引注入 403-bypass",
           any("403-bypass-complete" in p for p, _ in PHASE_READ_INDEX["linkage"]))
+    check("读取索引不膨胀:无条件层不含 xs_auth/business_flow(已移入条件层)",
+          not any("xs_auth" in p or "business_flow" in p for p, _ in PHASE_READ_INDEX["linkage"]))
+    check("条件层登记 xs_auth/business_flow(has_account)",
+          all(c == "has_account" for _, _, c in PHASE_READ_INDEX_COND["linkage"]))
     from core.report import _triage_check  # noqa: E402
     t_ok = _triage_check({"type": "信息泄露"},
                          "URL: http://x.com/api\n影响: 可读取用户手机号(前端已展示该数据)\n")
     check("triage data_not_public:证据自述前端已展示→降级原因",
           any("data_not_public" in r for r in t_ok), str(t_ok))
+
+    # 条件注入真实联动:write_brief 无账号时不注入 xs_auth,有 cookies.txt 时注入
+    jd4 = tmp2 / "ui-test-0004"
+    ev4 = jd4 / "evidence"
+    ev4.mkdir(parents=True)
+    (ev4 / "_endpoint_params.json").write_text(json.dumps(
+        {"_meta": {"analysis_completeness": 0.9},
+         "endpoints": [{"path": "/a"}, {"path": "/b"}, {"path": "/c"}]}), encoding="utf-8")
+    (ev4 / "_fingerprint.md").write_text("WAF 状态: 未检测到 WAF 特征\n", encoding="utf-8")
+    target4 = {"id": "ui-test-0004", "url": "https://test.example.com", "note": ""}
+
+    def brief_read_index(text):
+        """截取 BRIEF 读取索引段落(工具清单里的 xs_auth 字样不算)。"""
+        m = re.search(r"## 读取索引(.*?)(?=\n## |\Z)", text, re.S)
+        return m.group(1) if m else ""
+
+    write_brief(jd4, target4, ["test.example.com"], segs=3, seg_idx=1)
+    brief4 = brief_read_index((jd4 / "BRIEF.md").read_text(encoding="utf-8"))
+    check("条件注入:无账号时读取索引不含 xs_auth/business_flow",
+          "xs_auth" not in brief4 and "business_flow" not in brief4)
+    (jd4 / "cookies.txt").write_text("session=abc\n", encoding="utf-8")
+    write_brief(jd4, target4, ["test.example.com"], segs=3, seg_idx=1)
+    brief4b = brief_read_index((jd4 / "BRIEF.md").read_text(encoding="utf-8"))
+    check("条件注入:有 cookies.txt 时读取索引注入 xs_auth+business_flow",
+          "xs_auth" in brief4b and "business_flow" in brief4b)
 finally:
     shutil.rmtree(tmp2, ignore_errors=True)
 

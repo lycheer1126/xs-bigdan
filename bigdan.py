@@ -218,13 +218,11 @@ PHASE_READ_INDEX = {
         ("references/fingerprint-mapping.md", "指纹→测试映射表+WAF 签名(先探测 WAF 再动手)"),
         ("references/compliance-rules.md", "SRC 合规 TIER 分级,动手前必读"),
     ],
-    "linkage": [  # 🟡 普通测试: 值池联动/无认证扫/泛查询/IDOR
+    "linkage": [  # 🟡 普通测试: 值池联动/无认证扫/泛查询/IDOR（无条件注入；账号类见 COND 层）
         ("agents/api_fuzz/SKILL.md", "接口测试专家视角:全接口覆盖+产出标准"),
         ("skills/data_linkage/SKILL.md", "值池联动:JS需求表×响应值池=测试矩阵"),
         ("references/response-chaining.md", "响应链方法论:A 返回值→B 输入"),
         ("references/decision-trees/README.md", "参数特征命中→先读索引再精读对应§决策树小文件(29棵,防上下文泛滥)"),
-        ("skills/xs_auth/SKILL.md", "BRIEF 注入了测试账号时:登录口逻辑审计手册(JS审计→定向验证→接管链)"),
-        ("skills/business_flow/SKILL.md", "BRIEF 注入了账号/Cookie 时:登录态功能点遍历(四问框架+寻路四式+返回包地图)"),
         ("skills/hunt_ssrf/SKILL.md", "SSRF 狩猎手册:URL类参数优先测(低成本高价值,OOB确认→云元数据表→绕过变体→盲打三连)"),
         ("references/403-bypass-complete.md", "访问屏障处理(mastermind Phase 4):遇 403/401 按序尝试 路径操纵→方法切换→Header注入→协议降级→组合;无屏障则 digest 写 SKIPPED"),
     ],
@@ -234,7 +232,7 @@ PHASE_READ_INDEX = {
         ("references/discovery-amplification.md", "Discovery Amplification:端点→同类路径/参数榨干"),
         ("references/biz-mutations.md", "登录态业务参数扰动字典:七族扰动/命中即停(越权/状态机/载体探针)"),
     ],
-    "highrisk": [  # 🔴 条件阶段: 已有 ≥1 CONFIRMED 才进；WAF 存在全程 SAFE MODE
+    "highrisk": [  # 🔴 条件阶段: mastermind 式价值确认(有 CONFIRMED 或 无 WAF)才进；WAF 存在全程 SAFE MODE
         ("agents/exploit/SKILL.md", "利用专家视角:FOUND≠CONFIRMED 三级分类"),
         ("references/high-risk-probing.md", "高危探测细节(SQLi/CMD/SSTI/SSRF/XXE/越权)"),
         ("references/impact-escalation.md", "影响升级框架:证明实际危害"),
@@ -243,6 +241,16 @@ PHASE_READ_INDEX = {
         ("agents/report/SKILL.md", "报告视角:triage 6 项检查"),
         ("references/rating-standard.md", "SRC 评级标准(报告对齐)"),
         ("references/impact-escalation.md", "影响升级框架:影响写'能做什么'"),
+    ],
+}
+
+# 条件注入层：仅在对应条件满足时才拼进 BRIEF 读取索引（防无条件膨胀上下文——
+# xs_auth/business_flow 无账号时读了白读还占上下文）
+# 条件名: has_account = BRIEF 注入了测试账号(creds) 或 任务目录有 cookies.txt
+PHASE_READ_INDEX_COND = {
+    "linkage": [
+        ("skills/xs_auth/SKILL.md", "登录口逻辑审计手册(JS审计→定向验证→接管链)", "has_account"),
+        ("skills/business_flow/SKILL.md", "登录态功能点遍历(四问框架+寻路四式+返回包地图)", "has_account"),
     ],
 }
 
@@ -428,7 +436,12 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
 
     # 读取索引（按阶段注入;完整目录表在 prompts/methodology.md 第 13 节）
     phase, basis = infer_phase(job_dir)
-    read_idx = PHASE_READ_INDEX.get(phase, PHASE_READ_INDEX["recon"])
+    read_idx = list(PHASE_READ_INDEX.get(phase, PHASE_READ_INDEX["recon"]))
+    # 条件注入层:has_account(账号/Cookie 注入)才注入 xs_auth/business_flow,否则不占上下文
+    has_account = bool(creds) or (job_dir / "cookies.txt").is_file()
+    for path, why, cond in PHASE_READ_INDEX_COND.get(phase, []):
+        if cond == "has_account" and has_account:
+            read_idx.append((path, why))
     idx_lines = "\n".join(
         f"- `{knowledge_dir.as_posix()}/{path}` — {why}"
         for path, why in read_idx

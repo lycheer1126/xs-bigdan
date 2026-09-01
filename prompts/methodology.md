@@ -125,15 +125,17 @@
   绕过成功的端点必须回测(带/不带绕过参数各一次)并记录结果进已试路径。
   **无 403/401 屏障 → digest 写"SKIPPED bypass — 无访问屏障"**;401 且无凭据 → BLOCKED
   凭证门(system.md)。WAF Bypass 是最终手段,仅 highrisk 阶段确认高价值被 WAF 挡时才用。
-- **低成本注入探针（linkage 即测,不等 highrisk 门——零确认目标也必须测完这层才许收工）**:
-  单请求差分探针成本极低,**OOB 优先（参照 mastermind 12.2）**:盲打类一律走 dnslog.cn
-  (最快)→ Burp Collaborator → interactsh。**每类参数只试 1-2 次、命中即停**:
-  - SQLi 差分 `id=3-1`(数字)/`1'`(字符),盲注用 `SLEEP(5)` 计时+OOB 佐证
-  - SSTI `${7*7}`;CMD `;ping dnslog子域`/`|id`(OOB 回连优先于回显)
-  - **SSRF:url 参数换 dnslog 子域(有回调=确认)——禁止直打 127.0.0.1/169.254.x(一打就触发
-    WAF 拦截,且打草惊蛇);OOB 确认后才做内网/元数据确认(云元数据表见 hunt_ssrf)**
-  - XXE OOB(仅 XML 提交点,`<!DOCTYPE>` 外带 dnslog)
-  全参数试完无差异 → 才允许在 digest 写"注入面无差异"并建议结束;禁止跳过该层直接收工。
+- **定向探测（linkage 即测——按指纹匹配选型,不是固定 payload 清单机械执行）**:
+  探测是**模型判断力的发挥场**:指纹+参数语义+响应差异驱动,漏洞类型不限任何清单。
+  原则(mastermind Iron Rule 1 — Fingerprint First, Test What Matches):
+  - **栈匹配选型**:Java→反序列化/SpEL/Actuator, PHP→SSTI/文件包含/.env, Python→SSTI/任意文件读,
+    Node→原型污染/SSRF, .NET→ViewState/反序列化, Struts2→OGNL(S2-045 等,见 cve-chains)
+  - **参数语义选型**:数字参数→SQLi/整数边界, URL 参数→SSRF/开放重定向, 文本参数→XSS/SSTI,
+    文件参数→上传/路径穿越, XML 提交→XXE——payload 形态随参数语义构造,示例:`id=3-1`/`${7*7}` 仅示意
+  - **盲打类一律 dnslog OOB 确认**(dnslog.cn 最快→Collaborator→interactsh),**禁止直打 127.0.0.1/
+    169.254.x 等内网地址**(一打触发 WAF 拦截且打草惊蛇);OOB 回调确认后才做内网/元数据确认
+  - **响应驱动**:每类探测 1-2 次,长度/耗时/内容变化决定下一步(差分信号→深挖,无差异→换思路)
+  - 全参数面按上述原则测完无差异 → 才允许 digest 写"注入面无差异"并建议结束;禁止跳过直接收工。
 
 ## 5. JWT 与加密
 
@@ -146,7 +148,7 @@
 ## 6. 高危探测(手工,条件触发)
 
 前置:普通层(§3-4)完整 + 价值确认(已有中危+ 发现,或 指纹确认无 WAF——无 WAF 时敏感路径探测冒险成本低);全程 SAFE MODE。零发现+有 WAF → 不进本层,原因写 digest(显式跳过,禁止静默)。
-- 注入探针已在 linkage(§4 低成本探针层)测完——本阶段只对**已命中**的注入点做利用链/深挖,不再广撒网。
+- 注入探针已在 linkage(§4 定向探测)按指纹匹配测完——本阶段只对**已命中**的注入点做利用链/深挖,不再广撒网。
 - Admin 路径:Java→/actuator | PHP→/.env | Python→/admin/ | .NET→/web.config。
 - 垂直越权:已获得 token 逐条测管理端点;导出接口(export/download/excel/csv)权限单独测。
 - 全部测完:发现高价值被 WAF 挡 → 记 blocked 清单,不要当场死磕(WAF Bypass 是最终手段,留给人工)。
