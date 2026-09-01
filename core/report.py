@@ -354,7 +354,7 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
             for f in all_findings:
                 i += 1
                 level, icon = _risk_of(f)
-                if f.get("triage_reason"):
+                if f.get("triage_reason") or f.get("format_error"):
                     st = "⚠️ 降级"
                 else:
                     st = {"CONFIRMED": "✅ 确认", "PENDING": "⏳ 待确认", "INFO": "ℹ️ 信息"}.get(
@@ -370,28 +370,32 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
             lines.append("无。")
             lines.append("")
 
-        # 漏洞详情（triage 降级项不在此渲染，归入下方「降级/待复核」）
-        active = [f for f in all_findings if not f.get("triage_reason")]
-        demoted = [f for f in all_findings if f.get("triage_reason")]
+        # 漏洞详情（triage 降级项 / 格式异常项不在此渲染，归入下方「降级/待复核」）
+        active = [f for f in all_findings if not (f.get("triage_reason") or f.get("format_error"))]
+        demoted = [f for f in all_findings if f.get("triage_reason") or f.get("format_error")]
         if active:
             lines.append("### 漏洞详情")
             lines.append("")
             i = 0
             for st_key in ("CONFIRMED", "PENDING", "INFO"):
                 for f in by_status[st_key]:
-                    if f.get("triage_reason"):
+                    if f.get("triage_reason") or f.get("format_error"):
                         continue
                     i += 1
                     lines.extend(_finding_detail(i, f, job_dir))
             lines.append("")
 
-        # 降级/待复核：triage 未过的条目单独列出（不占漏洞编号，避免误读为独立漏洞）
+        # 降级/待复核：triage 未过 / FINDING 格式异常的条目单独列出（不占漏洞编号）
         if demoted:
-            lines.append("### 降级/待复核（triage 硬门未过，已从漏洞详情移除，提交前须补证据）")
+            lines.append("### 降级/待复核（triage 硬门未过或 FINDING 格式异常，已从漏洞详情移除）")
             lines.append("")
             for f in demoted:
+                reason = f.get("triage_reason") or f.get("format_error") or ""
+                extra = ""
+                if f.get("format_error") and not f.get("triage_reason"):
+                    extra = "；证据文件可能已落盘（agent 打 FINDING 时格式坏了），请人工核对 evidence/ 目录"
                 lines.append(f"- **{f.get('title') or '(未命名)'}**（类型: {f.get('type') or '未标注'}）"
-                             f"—— {f.get('triage_reason', '')}"
+                             f"—— {reason}{extra}"
                              + (f"；原证据文件: `{f['file']}`" if f.get("file") else ""))
             lines.append("")
 

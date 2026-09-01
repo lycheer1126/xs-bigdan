@@ -298,6 +298,20 @@ def _linkage_consumed(job_dir: Path) -> int:
     return n
 
 
+def _early_stop_gate(job_dir: Path) -> tuple[bool, str]:
+    """早停机械门槛:最小攻击面覆盖（防"没测完就建议结束"）。
+
+    纯落盘产物判定,不依赖 agent 自觉:recon 门过(契约文件达标) + 联动消费 ≥1
+    (值池联动/参数测试至少产出过一条结果)。产物不达标 → 拒绝早停,下段补测。
+    """
+    gate_ok, gate_why = _recon_gate(job_dir)
+    if not gate_ok:
+        return False, f"recon 门未过({gate_why})——JS 分析/契约文件未达标"
+    if _linkage_consumed(job_dir) < 1:
+        return False, "联动消费=0(值池联动/参数测试未产出任何结果,参数面疑似未测)"
+    return True, ""
+
+
 def infer_phase(job_dir: Path) -> tuple[str, str]:
     """阶段状态机:纯落盘产物推断（零 Agent 新增义务），返回 (阶段, 推断依据)。
 
@@ -306,14 +320,24 @@ def infer_phase(job_dir: Path) -> tuple[str, str]:
     BRIEF 会写明阶段+依据，Agent 有据可推翻。
     """
     # report: agent 明确建议结束（存在人工新线索时不短路——线索重新开面）
+    # 早停被拒豁免:该 digest 的"建议结束"已被机械门槛拒绝(earlystop-deny-*.txt)且无更新的 digest
+    # → 不视为 report,防止被拒后下一段被旧 digest 误判进报告阶段
     digests = sorted(job_dir.glob("digest-*.md"))
     fresh_clue = (job_dir / "user_input.md").is_file()
     if digests and not fresh_clue:
-        try:
-            if "建议结束" in digests[-1].read_text(encoding="utf-8", errors="replace"):
-                return "report", "最新 digest 标注建议结束"
-        except OSError:
-            pass
+        denied = []
+        for p in job_dir.glob("earlystop-deny-*.txt"):
+            seg = p.stem.split("-")[-1]
+            if seg.isdigit():
+                denied.append(int(seg))
+        last_seg = digests[-1].stem.split("-")[-1]
+        last_digest_seg = int(last_seg) if last_seg.isdigit() else 0
+        if not denied or last_digest_seg > max(denied):
+            try:
+                if "建议结束" in digests[-1].read_text(encoding="utf-8", errors="replace"):
+                    return "report", "最新 digest 标注建议结束"
+            except OSError:
+                pass
     # highrisk: ≥1 CONFIRMED 且 recon 门已过（门没过→回 recon 补，写明原因）
     confirmed = _confirmed_count(job_dir)
     if confirmed >= 1:
@@ -703,8 +727,10 @@ def extract_findings(log_text: str) -> List[dict]:
     """提取 FINDING: type|title|file|status 行；type/title 为空的脏行丢弃（宁缺勿滥）。
 
     反引号容错：agent 常把整行包进 `` ` ``（行内代码），老版正则因此漏提取。
-    硬校验（2026-09 加固）：标题截断（含 …）或超长、file 字段不合文件名规范
-    （如叙述句混入、带空格/中文标点）→ 整行丢弃，防止脏条目污染报告与去重。
+    格式异常策略（2026-09 加固）:标题截断/file 不合规/status 非法 → **降级为 PENDING
+    并附 format_error**（file 置空，报告层进"降级/待复核"区）——绝不静默丢弃：
+    实战教训（lenovo S2-045 RCE）:FINDING 行格式坏但证据已落盘,旧逻辑整行丢弃
+    导致报告 0 发现。宁可让异常条目进降级区由人工复核,不可让洞无声消失。
     """
     out: List[dict] = []
     for m in FINDING_RE.finditer(log_text):
@@ -720,14 +746,19 @@ def extract_findings(log_text: str) -> List[dict]:
         }
         if not f["type"] or not f["title"]:
             continue
-        if "…" in f["title"] or len(f["title"]) > 120:  # 截断标题 = 脏行
-            continue
-        if not _FINDING_FILE_RE.match(f["file"]):  # 叙述句/空格/标点混入 file 字段 = 脏行
-            continue
-        if f["status"] not in ("CONFIRMED", "PENDING", "INFO"):
-            if len(parts) > 3:  # 显式 status 但非法（粘行/污染）→ 脏行丢弃，不做默认归一化
-                continue
-            f["status"] = "CONFIRMED"  # status 字段缺失 → 默认
+        # 格式异常 → 降级 PENDING + 标注原因（不丢弃，进报告降级/待复核区）
+        if "…" in f["title"] or len(f["title"]) > 120:
+            f["format_error"] = f"标题截断/超长({len(f['title'])}字符)——agent 输出格式异常,需人工复核"
+            f["file"], f["status"] = "", "PENDING"
+        elif not _FINDING_FILE_RE.match(f["file"]):
+            f["format_error"] = f"证据文件名不合规({f['file'][:40]!r})——agent 把叙述句/标点混入 file 字段,需人工复核"
+            f["file"], f["status"] = "", "PENDING"
+        elif f["status"] not in ("CONFIRMED", "PENDING", "INFO"):
+            if len(parts) > 3:  # 显式 status 但非法（粘行/污染）→ 降级，不做默认归一化
+                f["format_error"] = f"状态字段异常({f['status'][:40]!r})——疑似多条 FINDING 粘行或字段污染,需人工复核"
+                f["file"], f["status"] = "", "PENDING"
+            else:
+                f["status"] = "CONFIRMED"  # status 字段缺失 → 默认
         if f not in out:
             out.append(f)
     return out
@@ -759,6 +790,8 @@ def compose_context(job_dir: Path, max_findings: int = 10, tail_events: int = 15
                 ev_lines.append(f"  {t} 触发重试:{','.join(e.get('categories', []))}")
             elif typ == "early_stop":
                 ev_lines.append(f"  {t} 早停(段{e.get('seg')})")
+            elif typ == "earlystop_deny":
+                ev_lines.append(f"  {t} ⚠️ 建议结束被拒(段{e.get('seg')}):{e.get('why')}——本段须补测后重新建议结束")
         parts.append("### 当前 run 状态(harness 记录)\n" + "\n".join(ev_lines))
     ev_dir = job_dir / "evidence"
     if ev_dir.is_dir():
@@ -916,8 +949,22 @@ def run_target(
         if digest:
             (job_dir / f"digest-{seg_no}.md").write_text(digest + "\n", encoding="utf-8")
             if "建议结束" in digest:
-                summary["early_stop"] = True
-                runlog(job_dir, "early_stop", {"seg": seg_no})
+                # 早停机械门槛:最小攻击面覆盖不达标 → 拒绝早停,下段补测(最多拒 2 次防死循环)
+                gate_ok, gate_why = _early_stop_gate(job_dir)
+                if gate_ok:
+                    summary["early_stop"] = True
+                    runlog(job_dir, "early_stop", {"seg": seg_no})
+                else:
+                    denied_n = len(list(job_dir.glob("earlystop-deny-*.txt")))
+                    if denied_n < 2:
+                        (job_dir / f"earlystop-deny-{seg_no}.txt").write_text(
+                            f"早停被拒(段{seg_no}):{gate_why}\n", encoding="utf-8")
+                        runlog(job_dir, "earlystop_deny",
+                               {"seg": seg_no, "why": gate_why, "denied_total": denied_n + 1})
+                        log(f"=== [{tag}] 段 {seg_no} 建议结束被机械门槛拒绝({gate_why}),下一段补测 ===")
+                    else:  # 连续 2 次被拒仍坚持结束 → 强制放行（已补测或确实无面可测）
+                        summary["early_stop"] = True
+                        runlog(job_dir, "early_stop", {"seg": seg_no, "forced": True})
         # 人工求助检测（BLOCKED 协议）：agent 请求人工输入 → 停止后续段等待线索。
         # digest 只截 RECON_DIGEST 起的尾部，其前的 BLOCKED 块要看 recover / 原始日志尾
         if BLOCKED_RE.search((digest or "") + "\n" + recover + "\n" + log_text[-4000:]):
