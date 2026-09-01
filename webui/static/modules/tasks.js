@@ -166,14 +166,27 @@ XSModules.tasks = (() => {
   }
 
   async function openGroupModal() {
-    let groups = [];
-    try { groups = (await XS.api("/api/groups")).groups || []; } catch { /* 列表加载失败不阻塞 */ }
+    let groups = [], jobs = [];
+    try {
+      [groups, jobs] = await Promise.all([
+        XS.api("/api/groups").then(r => r.groups || []).catch(() => []),
+        XS.api("/api/tasks").then(r => r.jobs || []).catch(() => []),
+      ]);
+    } catch { /* 列表加载失败不阻塞 */ }
+    const checked = new Set();
+    const taskRows = jobs.map(j => `
+      <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:8px;
+        border:1px solid var(--line);margin-bottom:4px;font-size:12.5px;cursor:pointer">
+        <input type="checkbox" class="grp-pick" value="${XS.esc(j.id)}">
+        <span class="muted" style="font-family:var(--mono);font-size:11px">${XS.esc(shortDomain(j.id))}</span>
+        <span class="muted" style="font-size:11px">${j.group ? `📁 ${XS.esc(j.group)}` : "未分组"}</span>
+      </label>`).join("") || `<div class="muted" style="font-size:12px">暂无任务</div>`;
     const mask = XS.modal(`
       <div class="modal-head">管理分组 <span class="x">✕</span></div>
       <div class="modal-body">
         <p class="muted" style="font-size:12.5px;margin-bottom:8px">
-          把同一厂商 / 同一批次的目标归到一组，看板按组过滤查看。任务卡片上的
-          分组下拉可随时把任务移入 / 移出组。</p>
+          把同一厂商 / 同一批次的目标归到一组，看板按组过滤查看。创建时可直接勾选任务加入，
+          之后也能用任务卡片上的分组下拉随时调整。</p>
         <div id="grp-list" style="margin-bottom:10px">
           ${groups.map(g => `
             <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--line);
@@ -184,25 +197,36 @@ XSModules.tasks = (() => {
               <button class="btn sm danger del-grp" data-grp="${XS.esc(g.name)}">删除</button>
             </div>`).join("") || `<div class="muted" style="font-size:12px;margin-bottom:6px">还没有分组</div>`}
         </div>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;margin-bottom:10px">
           <input id="grp-name" placeholder="新组名，如: 货拉拉、58、银联SRC" maxlength="30" autocomplete="off"
             style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--line);font-size:13px">
           <button class="btn primary" id="grp-ok" style="flex:0 0 auto">新建</button>
         </div>
+        <div class="muted" style="font-size:12px;margin-bottom:6px">选择要加入新组的任务（${jobs.length} 个）</div>
+        <div id="grp-pick-list" style="max-height:200px;overflow-y:auto">${taskRows}</div>
       </div>
       <div class="modal-foot">
         <button class="btn" id="grp-cancel">关闭</button>
       </div>`);
+    mask.querySelectorAll(".grp-pick").forEach(cb =>
+      cb.addEventListener("change", () => {
+        if (cb.checked) checked.add(cb.value); else checked.delete(cb.value);
+      }));
     mask.querySelector("#grp-cancel").addEventListener("click", () => mask.hidden = true);
     mask.querySelector("#grp-ok").addEventListener("click", async () => {
       const name = mask.querySelector("#grp-name").value.trim();
       if (!name) { XS.toast("请输入组名", "error"); return; }
+      const btn = mask.querySelector("#grp-ok");
+      btn.disabled = true; btn.textContent = "创建中…";
       try {
         await XS.api("/api/groups", { method: "POST", json: { name } });
-        XS.toast(`已创建分组「${name}」`, "ok");
+        for (const jobId of checked) {  // 勾选的任务批量入组
+          await XS.api("/api/groups/assign", { method: "POST", json: { job_id: jobId, group: name } });
+        }
+        XS.toast(`已创建分组「${name}」并加入 ${checked.size} 个任务`, "ok");
         mask.hidden = true;
         renderList();
-      } catch (e) { XS.toast("创建失败: " + e.message, "error"); }
+      } catch (e) { XS.toast("创建失败: " + e.message, "error"); btn.disabled = false; btn.textContent = "新建"; }
     });
     mask.querySelectorAll(".del-grp").forEach(b =>
       b.addEventListener("click", async () => {
@@ -227,7 +251,8 @@ XSModules.tasks = (() => {
         groupFilter = c.dataset.grp || "";
         renderList();
       }));
-    el.querySelectorAll(".grp-sel").forEach(s =>
+    el.querySelectorAll(".grp-sel").forEach(s => {
+      s.addEventListener("click", e => e.stopPropagation());  // 防冒泡触发卡片跳详情(分组下拉曾因此无法操作)
       s.addEventListener("change", async () => {
         const jobId = s.dataset.id, grp = s.value;
         try {
@@ -235,7 +260,8 @@ XSModules.tasks = (() => {
           XS.toast(grp ? `已移入「${grp}」` : "已移出分组", "ok");
           renderList();
         } catch (e) { XS.toast("分组失败: " + e.message, "error"); renderList(); }
-      }));
+      });
+    });
     el.querySelector("#btn-clearq")?.addEventListener("click", async () => {
       if (!confirm(`取消全部排队中的任务？（正在运行的不受影响）`)) return;
       try {
