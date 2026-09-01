@@ -12,7 +12,7 @@ XSModules.history = (() => {
     el.innerHTML = `
       <div class="page-head">
         <h1>历史报告</h1>
-        <span class="sub">runtime/outputs · report-*.md 归档</span>
+        <span class="sub">runtime/outputs · 序号-站点.md 归档</span>
         <div class="head-actions">
           <button class="btn" id="h-refresh">刷新</button>
           <button class="btn" id="h-open">打开 outputs 目录</button>
@@ -26,11 +26,6 @@ XSModules.history = (() => {
             <span class="spacer"></span>
             <button class="btn sm view-report" data-name="${XS.esc(r.name)}">查看</button>
           </div>`).join("") : `<div class="empty">暂无报告 — 任务运行结束后自动生成</div>`}
-      </div>
-      <div class="panel" id="h-content" hidden>
-        <div class="panel-head"><span id="h-title"></span><span class="spacer"></span>
-          <button class="btn sm" id="h-close">收起</button></div>
-        <div class="panel-body"><pre class="code" id="h-body"></pre></div>
       </div>`;
     el.querySelector("#h-refresh").addEventListener("click", render);
     el.querySelector("#h-open").addEventListener("click", async () => {
@@ -39,14 +34,19 @@ XSModules.history = (() => {
     el.querySelectorAll(".view-report").forEach(b =>
       b.addEventListener("click", async () => {
         const r = await XS.api(`/api/history/reports/${encodeURIComponent(b.dataset.name)}`);
-        const panel = el.querySelector("#h-content");
-        el.querySelector("#h-title").textContent = b.dataset.name;
-        el.querySelector("#h-body").textContent = r.content;
-        panel.hidden = false;
+        const mask = XS.modal(`
+          <div class="modal-head">${XS.esc(r.name)} <span class="x">✕</span></div>
+          <div class="modal-body" style="max-height:72vh;overflow:auto"><div class="md-body">${XS.md(r.content)}</div></div>
+          <div class="modal-foot">
+            <button class="btn" id="md-copy">复制原文</button>
+            <button class="btn" id="md-close">关闭</button>
+          </div>`);
+        mask.querySelector("#md-close").addEventListener("click", () => mask.hidden = true);
+        mask.querySelector("#md-copy").addEventListener("click", async () => {
+          try { await navigator.clipboard.writeText(r.content); XS.toast("报告原文已复制", "ok"); }
+          catch { XS.toast("复制失败", "error"); }
+        });
       }));
-    el.querySelector("#h-close").addEventListener("click", () => {
-      el.querySelector("#h-content").hidden = true;
-    });
   }
 
   return {

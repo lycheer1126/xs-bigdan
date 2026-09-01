@@ -179,8 +179,42 @@ def _check_evidence(job_dir: Path, f: dict) -> tuple:
     return True, ""
 
 
+_RAW_REQ_RE = re.compile(
+    r"(?m)(?:^|\n)(?:(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+ HTTP/\d(?:\.\d)?.*?(?=\n\s*\n|\n[A-Z][A-Za-z-]+:|\Z))"
+    r"|(?:curl\s+-[^\n]+)"
+)
+
+
+def _evidence_urls(text: str) -> List[str]:
+    """从证据文本提取接口地址（URL: 行或独立 URL）。"""
+    urls: List[str] = []
+    for m in re.finditer(r"(?m)^\s*(?:URL|url|接口地址|地址|Target)\s*[:：]\s*(https?://\S+)", text):
+        u = m.group(1).rstrip(".,;)]}")
+        if u not in urls:
+            urls.append(u)
+    if not urls:
+        for m in re.finditer(r"https?://[^\s'\"<>)]+", text):
+            u = m.group(0).rstrip(".,;)]}")
+            if u not in urls:
+                urls.append(u)
+    return urls[:5]
+
+
+def _evidence_raw_request(text: str) -> str:
+    """从证据提取完整请求包（HTTP 原始包优先,curl 命令兜底）——SRC 提交 Payload 包。"""
+    for m in re.finditer(
+            r"(?m)((?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+\s+HTTP/\d(?:\.\d)?\n"
+            r"(?:[A-Za-z0-9-]+:\s*[^\n]*\n)*)(?:\n|\Z)", text):
+        block = m.group(1).strip()
+        if len(block) > 40:
+            return block
+    for m in re.finditer(r"(?m)(curl\s+-[^\n]{20,})", text):
+        return m.group(1).strip()
+    return ""
+
+
 def _finding_detail(i: int, f: dict, job_dir: Path) -> List[str]:
-    """单个漏洞详情（对齐人工报告模板：等级/类型/描述/复现/影响/修复建议）。"""
+    """单个漏洞详情（SRC 提交标准格式:危害描述/接口地址/Payload 包/修复建议）。"""
     level, icon = _risk_of(f)
     lines = [f"### 漏洞{i}：{f.get('title') or '(未命名)'}", ""]
     lines.append(f"**风险等级**: {icon} {level}")
@@ -199,20 +233,41 @@ def _finding_detail(i: int, f: dict, job_dir: Path) -> List[str]:
         lines.append("")
 
     ev_text = evp.read_text(encoding="utf-8", errors="replace") if evp and evp.is_file() else ""
-    impact = _impact_from_evidence(ev_text)
-    if impact:
-        lines.append(f"**影响**: {impact}")
+
+    # 危害描述（影响,SRC 提交必需）
+    impact = _impact_from_evidence(ev_text) or f.get("title") or ""
+    lines.append(f"**危害描述**: {impact}")
+    lines.append("")
+
+    # 接口地址(Target)
+    urls = _evidence_urls(ev_text)
+    if urls:
+        lines.append("**【接口地址(Target)】**")
+        lines.append("")
+        for u in urls:
+            lines.append(f"- `{u}`")
         lines.append("")
 
-    lines.append("**证据（复现请求/关键响应，节选）**:")
-    lines.append("")
-    if evp and evp.is_file():
-        lines.append(_evidence_block(evp, limit=800))
-    else:
-        lines.append("（无证据文件）")
-    lines.append("")
+    # Payload 数据包(Raw)
+    raw = _evidence_raw_request(ev_text)
+    if raw:
+        lines.append("**【Payload数据包(Raw)】**")
+        lines.append("")
+        lines.append("```http")
+        lines.append(raw)
+        lines.append("```")
+        lines.append("")
 
-    lines.append(f"**修复建议**: {_fix_for(f)}")
+    # 关键响应
+    if evp and evp.is_file():
+        resp = _evidence_block(evp, limit=3000)
+        if raw:  # 有 Payload 时响应节选作为补充
+            lines.append("**关键响应（节选）**:")
+            lines.append("")
+            lines.append(resp)
+            lines.append("")
+
+    lines.append(f"**【修复建议】**: {_fix_for(f)}")
     lines.append("")
     lines.append("---")
     lines.append("")

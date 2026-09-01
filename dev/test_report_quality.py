@@ -121,7 +121,9 @@ try:
     ev.mkdir(parents=True)
     (ev / "01-cleartext.txt").write_text(
         "标题: 明文传输无HSTS\nURL: http://auth.58.com/dun_check_otp\n漏洞类型: 明文传输\n"
-        "## 复现\n1) GET http://auth.58.com/58shieldlogin.html → 200\n影响: 动态码可明文截获\n",
+        "## 复现\n1) GET http://auth.58.com/58shieldlogin.html → 200\n"
+        "POST /dun_check_otp HTTP/1.1\nHost: auth.58.com\nContent-Type: application/x-www-form-urlencoded\n\n"
+        "username=admin&otp=123456\n影响: 动态码可明文截获\n",
         encoding="utf-8")
     summary = {
         "id": "ui-test-0001", "url": "https://auth.58.com/login_58dun.html",
@@ -149,6 +151,10 @@ try:
     check("降级区提示证据可能已落盘", "请人工核对 evidence/ 目录" in rep)
     check("DS_Store 评级低危", "| 🟢 低危 |" in rep)
     check("证据全文内联", "01-cleartext" in rep)
+    check("SRC格式:危害描述", "**危害描述**" in rep and "动态码可明文截获" in rep)
+    check("SRC格式:接口地址Target", "【接口地址(Target)】" in rep and "auth.58.com/dun_check_otp" in rep)
+    check("SRC格式:Payload数据包Raw", "【Payload数据包(Raw)】" in rep and "POST /dun_check_otp HTTP/1.1" in rep and "Host: auth.58.com" in rep)
+    check("SRC格式:修复建议", "【修复建议】" in rep and "HSTS" in rep)
     check("附录:Agent原始交接存在且位于修复建议后",
           "## 附录：Agent 原始交接" in rep and
           rep.index("## 修复建议（通用）") < rep.index("## 附录：Agent 原始交接"))

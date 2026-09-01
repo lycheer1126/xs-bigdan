@@ -821,6 +821,37 @@ def _blocked_hours(job_dir: Path):
     return None
 
 
+def task_report(job_id: str) -> dict | None:
+    """按任务域名找最新报告(outputs 序号化 00-站点.md),无则 None。"""
+    host = ""
+    sf = JOBS_DIR / job_id / "summary.json"
+    if sf.is_file():
+        try:
+            s = json.loads(sf.read_text(encoding="utf-8"))
+            host = re.sub(r"^https?://", "", (s.get("url") or "")).split("/")[0].split(":")[0]
+        except (OSError, json.JSONDecodeError):
+            host = ""
+    if not host:
+        host = job_id.split("-")[0] if "-" in job_id else job_id
+    best = None
+    for p in OUTPUTS_DIR.glob("*.md"):
+        m = re.match(r"^(\d{2,})-", p.name)
+        if not m:
+            continue
+        if host and host not in p.name:
+            continue
+        key = (int(m.group(1)), p.stat().st_mtime)
+        if best is None or key > best[0]:
+            best = (key, p)
+    if best is None:
+        return None
+    p = best[1]
+    try:
+        return {"name": p.name, "content": p.read_text(encoding="utf-8", errors="replace")}
+    except OSError:
+        return None
+
+
 def generate_report(job_id: str = "") -> dict:
     """手动生成报告（修复:webui 停止/进程被杀时 main 未跑到报告生成,任务无报告）。
 
@@ -853,10 +884,17 @@ def generate_report(job_id: str = "") -> dict:
         s.setdefault("url", _brief_meta(jobs_dir / i)[0] or i)
         summaries.append(s)
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-    if len(summaries) == 1 and job_id:
-        name = f"report-{job_id}.md"
+    # 序号化命名（与 bigdan.py main 一致）: {序号:02d}-{站点}{-备注}.md,去时间戳与 report- 前缀
+    seq = 0
+    for p in OUTPUTS_DIR.glob("*.md"):
+        m = re.match(r"^(\d{2,})-", p.name)
+        if m:
+            seq = max(seq, int(m.group(1)))
+    if len(summaries) == 1:
+        host = re.sub(r"^https?://", "", (summaries[0].get("url") or "")).split("/")[0].split(":")[0]
+        name = f"{seq + 1:02d}-{host or job_id}.md"
     else:
-        name = f"report-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+        name = f"{seq + 1:02d}-multi-{len(summaries)}.md"
     report_path = OUTPUTS_DIR / name
     report_mod.build_report(summaries, report_path, jobs_dir)
     return {"path": f"runtime/outputs/{name}", "jobs": len(summaries)}

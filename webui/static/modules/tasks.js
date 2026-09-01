@@ -49,6 +49,7 @@ XSModules.tasks = (() => {
     const grpOpts = `<option value="">未分组</option>` +
       groups.map(g => `<option value="${XS.esc(g.name)}" ${j.group === g.name ? "selected" : ""}>${XS.esc(g.name)}</option>`).join("");
     const buttons = `
+      <button class="btn sm report-btn" data-id="${XS.esc(j.id)}" title="查看/生成漏洞报告">报告</button>
       <button class="btn sm detail-btn" data-id="${XS.esc(j.id)}">详情</button>
       ${j.state === "running" ? `
         <button class="btn sm danger stop-btn" data-id="${XS.esc(j.id)}">停止</button>` : `
@@ -137,6 +138,30 @@ XSModules.tasks = (() => {
         </div>`;
       bindList();
     } catch (e) { XS.toast("列表刷新失败: " + e.message, "error"); }
+  }
+
+  async function openReportModal(jobId) {
+    let r;
+    try {
+      r = await XS.api(`/api/tasks/${jobId}/report`);
+    } catch {
+      try {
+        await XS.api("/api/tasks/report", { method: "POST", json: { job_id: jobId } });
+        r = await XS.api(`/api/tasks/${jobId}/report`);
+      } catch (e) { XS.toast("报告读取/生成失败: " + e.message, "error"); return; }
+    }
+    const mask = XS.modal(`
+      <div class="modal-head">${XS.esc(r.name)} <span class="x">✕</span></div>
+      <div class="modal-body" style="max-height:72vh;overflow:auto"><div class="md-body">${XS.md(r.content)}</div></div>
+      <div class="modal-foot">
+        <button class="btn" id="md-copy">复制原文</button>
+        <button class="btn" id="md-close">关闭</button>
+      </div>`);
+    mask.querySelector("#md-close").addEventListener("click", () => mask.hidden = true);
+    mask.querySelector("#md-copy").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(r.content); XS.toast("报告原文已复制", "ok"); }
+      catch { XS.toast("复制失败", "error"); }
+    });
   }
 
   function openInputModal(jobId) {
@@ -270,6 +295,8 @@ XSModules.tasks = (() => {
         renderList();
       } catch (err) { XS.toast(err.message, "error"); }
     });
+    el.querySelectorAll(".report-btn").forEach(b =>
+      b.addEventListener("click", e => { e.stopPropagation(); openReportModal(b.dataset.id); }));
     el.querySelectorAll(".detail-btn").forEach(b =>
       b.addEventListener("click", e => { e.stopPropagation(); location.hash = `#/tasks/${b.dataset.id}`; }));
     el.querySelectorAll(".card").forEach(c =>
@@ -444,7 +471,7 @@ XSModules.tasks = (() => {
             `<button class="btn danger" id="d-stop">停止</button>` :
             `<button class="btn primary" id="d-resume">续跑</button>`}
           ${state === "blocked" ? `<button class="btn" id="d-hint" style="color:var(--warn);border-color:var(--warn)">提供线索</button>` : ""}
-          <button class="btn" id="d-report" title="手动生成报告(中断/半成品任务也出,含降级/附录)">生成报告</button>
+          <button class="btn" id="d-report" title="查看漏洞报告(无则先生成,中断/半成品任务也出)">报告</button>
           <button class="btn" id="d-open">打开目录</button>
           <button class="btn danger" id="d-del">删除</button>
         </div>
@@ -473,12 +500,7 @@ XSModules.tasks = (() => {
       } catch (e) { XS.toast(e.message, "error"); }
     });
     el.querySelector("#d-hint")?.addEventListener("click", () => openInputModal(detailId));
-    el.querySelector("#d-report")?.addEventListener("click", async () => {
-      try {
-        const r = await XS.api("/api/tasks/report", { method: "POST", json: { job_id: detailId } });
-        XS.toast(`报告已生成: ${r.path}（${r.jobs} 个任务）`, "ok", 5000);
-      } catch (e) { XS.toast("生成报告失败: " + e.message, "error"); }
-    });
+    el.querySelector("#d-report")?.addEventListener("click", () => openReportModal(detailId));
     el.querySelector("#d-open")?.addEventListener("click", async () => {
       await XS.api(`/api/tasks/${detailId}/open-dir`, { method: "POST" });
     });

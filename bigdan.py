@@ -1348,9 +1348,14 @@ def main() -> int:
     else:
         site_part = f"multi-{len(sites)}"
         note_part = ""
-    # 报告名固定(不带时间戳):续跑/重跑覆盖同站点报告,webui 历史列表永远指向最新内容。
-    # 旧带时间戳的报告文件保留在 outputs/ 可手动归档。
-    name = f"report-{site_part}" + (f"-{note_part}" if note_part else "")
+    # 报告名序号化(用户要求): {序号:02d}-{站点}{-备注}.md —— 序号=现有最大序号+1,
+    # 递增唯一、历史页按序号自然排序;去掉 report- 前缀与时间戳。
+    seq = 0
+    for p in OUTPUTS_DIR.glob("*.md"):
+        m = re.match(r"^(\d{2,})-", p.name)
+        if m:
+            seq = max(seq, int(m.group(1)))
+    name = f"{seq + 1:02d}-{site_part}" + (f"-{note_part}" if note_part else "")
     report_path = OUTPUTS_DIR / f"{name}.md"
     build_report(all_summaries, report_path, JOBS_DIR)
     log(f"[+] 报告已生成: {report_path}")

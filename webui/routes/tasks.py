@@ -38,6 +38,15 @@ class UserInputReq(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+@router.get("/{job_id}/report")
+def get_task_report(job_id: str):
+    """读任务最新报告(序号化 00-站点.md,按域名匹配)。"""
+    r = core.task_report(job_id)
+    if r is None:
+        raise HTTPException(404, f"任务 {job_id} 暂无报告(点「生成报告」先出报告)")
+    return r
+
+
 @router.post("/report")
 def make_report(req: dict = None):
     """手动生成报告:指定 job_id 出单任务报告,不指定出全部(有 summary 的)。

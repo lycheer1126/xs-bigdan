@@ -45,6 +45,13 @@ const XS = (() => {
     }[c]));
   }
 
+  function md(text) {
+    if (window.marked) {
+      try { return marked.parse(String(text ?? "")); } catch { /* fallthrough */ }
+    }
+    return esc(text).replace(/\n/g, "<br>");
+  }
+
   function fmtBytes(n) {
     if (n == null) return "-";
     if (n < 1024) return n + " B";
@@ -152,7 +159,7 @@ const XS = (() => {
     route();
   }
 
-  return { api, toast, esc, fmtBytes, fmtDur, stateBadge, modal, poll, clearTimers, boot, ICONS };
+  return { api, toast, esc, md, fmtBytes, fmtDur, stateBadge, modal, poll, clearTimers, boot, ICONS };
 })();
 
 document.addEventListener("DOMContentLoaded", () => XS.boot().catch(e => {
