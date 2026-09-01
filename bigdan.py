@@ -899,6 +899,22 @@ def compose_context(job_dir: Path, max_findings: int = 10, tail_events: int = 15
     + 已有证据文件清单。注入每段 user prompt 头部,防上下文泛滥(限长)。
     """
     parts: List[str] = []
+    # 上段机械门槛拒绝醒目块（修复3:被拒原因不能埋在事件流里,须拼进 prompt 最前部——
+    # agent 忽略事件流会再次被拒白烧预算;deny 文件在门槛通过时由段循环清理,故只在待补齐期出现）
+    denies: List[str] = []
+    for p in sorted(job_dir.glob("earlystop-deny-*.txt")):
+        try:
+            denies.append(f"- [早停被拒] {p.read_text(encoding='utf-8', errors='replace').strip()}")
+        except OSError:
+            pass
+    for p in sorted(job_dir.glob("blocked-deny-*.txt")):
+        try:
+            denies.append(f"- [凭证门被拒] {p.read_text(encoding='utf-8', errors='replace').strip()}")
+        except OSError:
+            pass
+    if denies:
+        parts.append("### ⚠️ 上段被机械门槛拒绝（本段第一优先：按下列原因补齐产物，再继续其他测试）\n"
+                     + "\n".join(denies))
     events = load_recent_runlog(job_dir, limit=tail_events)
     if events:
         ev_lines: List[str] = []
@@ -1082,6 +1098,11 @@ def run_target(
                 if gate_ok:
                     summary["early_stop"] = True
                     runlog(job_dir, "early_stop", {"seg": seg_no})
+                    for p in job_dir.glob("earlystop-deny-*.txt"):  # 门槛已过,清理被拒标记
+                        try:
+                            p.unlink()
+                        except OSError:
+                            pass
                 else:
                     denied_n = len(list(job_dir.glob("earlystop-deny-*.txt")))
                     if denied_n < 2:
@@ -1110,6 +1131,11 @@ def run_target(
                 else:
                     summary["blocked"] = True
                     runlog(job_dir, "blocked", {"seg": seg_no, "forced": True})
+                    for p in job_dir.glob("blocked-deny-*.txt"):  # 已接受 BLOCKED,清理被拒标记
+                        try:
+                            p.unlink()
+                        except OSError:
+                            pass
             else:
                 summary["blocked"] = True
                 runlog(job_dir, "blocked", {"seg": seg_no})

@@ -308,6 +308,15 @@ try:
         json.dumps({"endpoint": "/api/b", "hit": False, "note": "403 认证"}),
     ]) + "\n", encoding="utf-8")
     check("认证墙场景:401 测试结果计入有效联动 → 凭证门放行", _credential_gate_ok(jd6))
+
+    # 修复3:被拒原因醒目块(拼进 prompt 最前部,防 agent 忽略事件流再被拒白烧预算)
+    from bigdan import compose_context  # noqa: E402
+    ctx = compose_context(jd3)
+    check("被拒醒目块:无 deny 文件时不出现", "上段被机械门槛拒绝" not in ctx)
+    (jd3 / "earlystop-deny-2.txt").write_text("早停被拒(段2):联动消费=0(参数面疑似未测)\n", encoding="utf-8")
+    ctx = compose_context(jd3)
+    check("被拒醒目块:deny 存在时拼进 prompt 最前部且含原因",
+          ctx.startswith("### ⚠️ 上段被机械门槛拒绝") and "联动消费=0" in ctx)
 finally:
     shutil.rmtree(tmp2, ignore_errors=True)
 
