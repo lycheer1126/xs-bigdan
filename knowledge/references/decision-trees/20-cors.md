@@ -1,4 +1,8 @@
 # §20 CORS Misconfiguration
+
+> ⚠️ **SRC 场景永久不挖不报**（与 system.md「报告三闸」一致：平台不收，省预算）——本文件仅作技术资料保留；
+> 遇到 CORS 特征直接跳过，转注入/越权等类型。登录/重置/改绑链路上的 CORS 不单独测。
+
 ### 识别信号
 - API response contains sensitive data (user info, tokens, private content)
 - Response headers include: `Access-Control-Allow-Origin`, `Access-Control-Allow-Credentials`

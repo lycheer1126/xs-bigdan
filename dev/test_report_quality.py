@@ -216,6 +216,10 @@ try:
     from bigdan import PHASE_READ_INDEX, PHASE_READ_INDEX_COND, write_brief  # noqa: E402
     check("Phase4正式化:linkage 读取索引注入 403-bypass",
           any("403-bypass-complete" in p for p, _ in PHASE_READ_INDEX["linkage"]))
+    check("手法库注入:linkage 含 breakthrough-shortlist(防知识存在但agent不会读)",
+          any("breakthrough-shortlist" in p for p, _ in PHASE_READ_INDEX["linkage"]))
+    check("手法库注入:highrisk 含 advanced-techniques",
+          any("advanced-techniques" in p for p, _ in PHASE_READ_INDEX["highrisk"]))
     check("读取索引不膨胀:无条件层不含 xs_auth/business_flow(已移入条件层)",
           not any("xs_auth" in p or "business_flow" in p for p, _ in PHASE_READ_INDEX["linkage"]))
     check("条件层登记 xs_auth/business_flow(has_account)",
