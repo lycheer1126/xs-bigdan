@@ -75,6 +75,14 @@ if dirty:
 clean_07 = by_type.get("明文传输", [])
 check("正常行 CONFIRMED 保留(file 合法)", any(f["status"] == "CONFIRMED" and f["file"] == "07-http-cleartext-login.txt" for f in clean_07))
 
+# wms 案例修复:status 污染降级保留 file(仅状态粘行,证据文件名完好)
+STATUS_POLLUTED = ("FINDING: 未授权信息泄露|未授权获取低代码应用完整配置页面schema与69个内部API端点|"
+                   "02-unauth-app-config-disclosure.txt|CONFIRMED 继续探测：发码接口存在手机号枚举")
+sp = extract_findings(STATUS_POLLUTED)
+check("status污染:降级且保留 file(可关联证据文件)", len(sp) == 1 and sp[0]["status"] == "PENDING"
+      and sp[0]["file"] == "02-unauth-app-config-disclosure.txt"
+      and "状态字段异常" in sp[0].get("format_error", ""), str(sp))
+
 # ============ 2. 归一化去重 ============
 
 seg1 = [f for f in fs if f["file"] == "07-http-cleartext-login.txt"]

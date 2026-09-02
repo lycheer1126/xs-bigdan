@@ -486,6 +486,21 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
                 lines.append(f"- **{f.get('title') or '(未命名)'}**（类型: {f.get('type') or '未标注'}）"
                              f"—— {reason}{extra}"
                              + (f"；原证据文件: `{f['file']}`" if f.get("file") else ""))
+                # 证据内容内联（复现步骤直接可看,不用翻 evidence 目录）
+                if f.get("file") and not f.get("triage_reason"):
+                    evp = job_dir / "evidence" / Path(f["file"]).name
+                    if evp.is_file():
+                        ev_text = evp.read_text(encoding="utf-8", errors="replace")
+                        raw = _evidence_raw_request(ev_text)
+                        if raw:
+                            lines.append("")
+                            lines.append("  复现请求:")
+                            lines.append("  ```http")
+                            lines.append("  " + raw.replace("\n", "\n  "))
+                            lines.append("  ```")
+                        else:
+                            lines.append("")
+                            lines.append(_evidence_block(evp, limit=2000))
             lines.append("")
 
         # 证据线索（findings 空时的兜底呈现 + digest 疑似点）
@@ -494,6 +509,18 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
             lines.append("")
             for c in clues:
                 lines.append(f"- `evidence/{c.name}`（{c.stat().st_size} 字节）")
+                # 内容内联:线索的复现请求/响应节选(证据可能存在价值的洞,直接可复现判断)
+                text = c.read_text(encoding="utf-8", errors="replace")
+                raw = _evidence_raw_request(text)
+                if raw:
+                    lines.append("")
+                    lines.append("  复现请求:")
+                    lines.append("  ```http")
+                    lines.append("  " + raw.replace("\n", "\n  "))
+                    lines.append("  ```")
+                else:
+                    lines.append("")
+                    lines.append(_evidence_block(c, limit=2000))
             lines.append("")
 
         suspect = _extract_digest_section(job_dir, "疑似点")

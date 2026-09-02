@@ -925,7 +925,10 @@ def extract_findings(log_text: str) -> List[dict]:
         elif f["status"] not in ("CONFIRMED", "PENDING", "INFO"):
             if len(parts) > 3:  # 显式 status 但非法（粘行/污染）→ 降级，不做默认归一化
                 f["format_error"] = f"状态字段异常({f['status'][:40]!r})——疑似多条 FINDING 粘行或字段污染,需人工复核"
-                f["file"], f["status"] = "", "PENDING"
+                # 仅清 status,保留 file——状态污染时证据文件名通常是完好的(wms 案例:
+                # file=02-xxx.txt 正确但 status 粘了"CONFIRMED 继续探测..."),保留才能
+                # 让报告降级区关联证据文件并展示复现步骤
+                f["status"] = "PENDING"
             else:
                 f["status"] = "CONFIRMED"  # status 字段缺失 → 默认
         if f not in out:
