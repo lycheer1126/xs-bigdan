@@ -120,10 +120,11 @@ try:
     ev = jd / "evidence"
     ev.mkdir(parents=True)
     (ev / "01-cleartext.txt").write_text(
-        "标题: 明文传输无HSTS\nURL: http://auth.58.com/dun_check_otp\n漏洞类型: 明文传输\n"
-        "## 复现\n1) GET http://auth.58.com/58shieldlogin.html → 200\n"
-        "POST /dun_check_otp HTTP/1.1\nHost: auth.58.com\nContent-Type: application/x-www-form-urlencoded\n\n"
-        "username=admin&otp=123456\n影响: 动态码可明文截获\n",
+        "标题: 明文传输无HSTS\nURL: http://auth.58.com/dun_check_otp\nURL2: http://auth.58.com/58shieldlogin.html\n"
+        "漏洞类型: 明文传输\n## 复现\nPOST /dun_check_otp HTTP/1.1\nHost: auth.58.com\n"
+        "Content-Type: application/x-www-form-urlencoded\n\nusername=admin&otp=123456\n"
+        "关键响应 (无 Cookie):\nHTTP/1.1 200 OK\nContent-Type: application/json\n\n{\"code\":-1}\n"
+        "影响: 动态码可明文截获,攻击者可在无认证下持续尝试\n",
         encoding="utf-8")
     summary = {
         "id": "ui-test-0001", "url": "https://auth.58.com/login_58dun.html",
@@ -155,6 +156,10 @@ try:
     check("SRC格式:接口地址Target", "【接口地址(Target)】" in rep and "auth.58.com/dun_check_otp" in rep)
     check("SRC格式:Payload数据包Raw", "【Payload数据包(Raw)】" in rep and "POST /dun_check_otp HTTP/1.1" in rep and "Host: auth.58.com" in rep)
     check("SRC格式:修复建议", "【修复建议】" in rep and "HSTS" in rep)
+    check("SRC格式:危害描述无双重标签(影响:影响:)", "**危害描述**: 影响" not in rep)
+    check("SRC格式:关键响应为响应提取(HTTP状态行,非全文)", "**关键响应**" in rep and "HTTP/1.1 200 OK" in rep
+          and "明文传输无HSTS\nURL:" not in rep.replace("**关键响应**", "").split("```")[2] if "```" in rep else True)
+    check("SRC格式:Target 多 URL(URL2 行也被列出)", rep.count("auth.58.com") >= 2)
     check("附录:Agent原始交接存在且位于修复建议后",
           "## 附录：Agent 原始交接" in rep and
           rep.index("## 修复建议（通用）") < rep.index("## 附录：Agent 原始交接"))

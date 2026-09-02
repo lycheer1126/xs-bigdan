@@ -157,12 +157,34 @@ def _digest_full(job_dir: Path, limit: int = 20000) -> str:
     return text
 
 
+def _evidence_response(text: str, limit: int = 1500) -> str:
+    """从证据提取关键响应（SRC 提交只需证明成功的响应,不要整个证据全文内联）。
+
+    优先:"关键响应/响应:"标记后的内容(通常含状态码+JSON,到 验证/影响/上传后/HTTP 等下一标记前);
+    其次:HTTP 状态行起的响应块(限 8 行,防带入后续段落);上限 limit。
+    """
+    m = re.search(
+        r"(?:关键)?响应\s*[:：]?\s*[^\n]*\n(.*?)(?=\n\s*(?:验证|影响|危害|修复|curl|上传后|可直接访问|GET https|HTTP/|\Z))",
+        text, re.S)
+    if m:
+        sec = m.group(1).strip()
+        if sec and len(sec) > 10:
+            return sec[:limit]
+    for m in re.finditer(
+            r"(?m)^\s*(HTTP/\d(?:\.\d)?\s+\d{3}[^\n]*\n(?:[^\n]*\n){0,8})", text):
+        block = m.group(1).strip()
+        if len(block) > 20:
+            return block[:limit]
+    return ""
+
+
 def _impact_from_evidence(text: str) -> str:
-    """从证据文本提取「影响」说明（尽力而为）。"""
-    for pat in (r"影响[^\n]{2,200}", r"危害[^\n]{2,200}", r"后果[^\n]{2,200}"):
-        m = re.search(pat, text)
+    """从证据文本提取「影响」说明（去掉"影响:"前缀,支持跨行——修复双重标签+换行截断）。"""
+    for pat in (r"影响\s*[:：]\s*(.{5,400})", r"危害\s*[:：]\s*(.{5,400})",
+                r"后果\s*[:：]\s*(.{5,400})", r"影响等级\s*[:：]\s*(.{5,400})"):
+        m = re.search(pat, text, re.S)
         if m:
-            return m.group(0).strip()
+            return re.sub(r"\s+", " ", m.group(1)).strip()
     return ""
 
 
@@ -186,17 +208,16 @@ _RAW_REQ_RE = re.compile(
 
 
 def _evidence_urls(text: str) -> List[str]:
-    """从证据文本提取接口地址（URL: 行或独立 URL）。"""
+    """从证据文本提取接口地址（URL: 行优先,独立 https URL 补充——SRC 提交 Target 可多列）。"""
     urls: List[str] = []
     for m in re.finditer(r"(?m)^\s*(?:URL|url|接口地址|地址|Target)\s*[:：]\s*(https?://\S+)", text):
         u = m.group(1).rstrip(".,;)]}")
         if u not in urls:
             urls.append(u)
-    if not urls:
-        for m in re.finditer(r"https?://[^\s'\"<>)]+", text):
-            u = m.group(0).rstrip(".,;)]}")
-            if u not in urls:
-                urls.append(u)
+    for m in re.finditer(r"https?://[^\s'\"<>)]+", text):
+        u = m.group(0).rstrip(".,;)]}")
+        if u not in urls:
+            urls.append(u)
     return urls[:5]
 
 
@@ -262,13 +283,15 @@ def _finding_detail(i: int, f: dict, job_dir: Path) -> List[str]:
         lines.append("```")
         lines.append("")
 
-    # 关键响应（全文内联,SRC 提交需要完整响应）
+    # 关键响应（提取响应部分作证明,不再全文内联——SRC 格式精炼）
     if evp and evp.is_file():
-        resp = _evidence_block(evp, limit=50000)
+        resp = _evidence_response(ev_text)
+        if not resp:
+            resp = _evidence_block(evp, limit=2000)  # fallback:证据无响应段时截取
         if raw:  # 有 Payload 时响应作为补充
             lines.append("**关键响应**:")
             lines.append("")
-            lines.append(resp)
+            lines.append(f"```\n{resp}\n```")
             lines.append("")
 
     lines.append(f"**【修复建议】**: {_fix_for(f)}")
