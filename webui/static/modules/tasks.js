@@ -41,9 +41,12 @@ XSModules.tasks = (() => {
     return `<div class="stat ${cls}"><div class="num">${num}</div><div class="lbl">${label}</div></div>`;
   }
 
-  function cardHTML(j, groups) {
+  function cardHTML(j, groups, marks) {
+    const mk = (marks && marks[j.id]) || { task: false, vulns: {} };
     const vulns = Object.entries(j.findings_by_type || {})
-      .map(([t, n]) => `<span class="tag vuln">${XS.esc(vulnCN(t))}×${n}</span>`).join("");
+      .map(([t, n]) => `<span class="tag vuln mark-vuln ${mk.vulns[t] ? "on" : ""}"
+        data-id="${XS.esc(j.id)}" data-type="${XS.esc(t)}"
+        title="点击标记该漏洞类型已被 SRC 确认有效(再次点击取消)">${XS.esc(vulnCN(t))}×${n}</span>`).join("");
     const pct = j.segments_planned
       ? Math.round((j.segments_ran / j.segments_planned) * 100) : 0;
     const grpOpts = `<option value="">未分组</option>` +
@@ -67,6 +70,8 @@ XSModules.tasks = (() => {
               border:1px solid ${j.blocked_hours >= 48 ? "rgba(220,38,38,.5)" : "rgba(217,119,6,.5)"}"
               title="BLOCKED 挂起时长(等人工提供线索/账号)">⏱ 已挂 ${j.blocked_hours >= 48 ? "超48h" : j.blocked_hours + "h"}</span>` : ""}
           <span class="spacer" style="flex:1"></span>
+          <button class="mark-btn ${mk.task ? "on" : ""}" data-id="${XS.esc(j.id)}" data-scope="task"
+            title="标记该任务挖到的漏洞已被 SRC 确认有效(点击切换)">✓</button>
           <span class="card-meta">${j.findings_count} 个发现</span>
         </div>
         <div class="card-domain">${XS.esc(shortDomain(j.id))}</div>
@@ -94,7 +99,11 @@ XSModules.tasks = (() => {
   async function renderList() {
     if (!el || detailId) return;
     try {
-      const [data, grp] = await Promise.all([XS.api("/api/tasks"), XS.api("/api/groups")]);
+      const [data, grp, mk] = await Promise.all([
+        XS.api("/api/tasks"), XS.api("/api/groups"),
+        XS.api("/api/marks").catch(() => ({ jobs: {} })),
+      ]);
+      const marks = mk.jobs || {};
       const s = data.stats;
       const groups = grp.groups || [];
       let jobs = data.jobs;
@@ -133,7 +142,7 @@ XSModules.tasks = (() => {
         </div>
         ${grpBar}
         <div class="cards">
-          ${jobs.length ? jobs.map(j => cardHTML(j, groups)).join("") :
+          ${jobs.length ? jobs.map(j => cardHTML(j, groups, marks)).join("") :
             `<div class="empty" style="grid-column:1/-1">${groupFilter ? "该分组暂无任务 — 点「全部」查看其它" : "暂无任务 — 点击右上角「新建任务」开始"}</div>`}
         </div>`;
       bindList();
@@ -297,6 +306,24 @@ XSModules.tasks = (() => {
     });
     el.querySelectorAll(".report-btn").forEach(b =>
       b.addEventListener("click", e => { e.stopPropagation(); openReportModal(b.dataset.id); }));
+    el.querySelectorAll(".mark-btn").forEach(b =>
+      b.addEventListener("click", async e => {
+        e.stopPropagation();
+        try {
+          const r = await XS.api("/api/marks/toggle", { method: "POST", json: { job_id: b.dataset.id, scope: "task" } });
+          XS.toast(r.state ? "已标记该任务漏洞有效 ✓" : "已取消标记", "ok");
+          renderList();
+        } catch (err) { XS.toast("标记失败: " + err.message, "error"); }
+      }));
+    el.querySelectorAll(".mark-vuln").forEach(t =>
+      t.addEventListener("click", async e => {
+        e.stopPropagation();
+        try {
+          const r = await XS.api("/api/marks/toggle", { method: "POST", json: { job_id: t.dataset.id, scope: "vuln", key: t.dataset.type } });
+          XS.toast(r.state ? `「${vulnCN(t.dataset.type)}」已点亮 ✓` : "已取消点亮", "ok");
+          renderList();
+        } catch (err) { XS.toast("标记失败: " + err.message, "error"); }
+      }));
     el.querySelectorAll(".detail-btn").forEach(b =>
       b.addEventListener("click", e => { e.stopPropagation(); location.hash = `#/tasks/${b.dataset.id}`; }));
     el.querySelectorAll(".card").forEach(c =>

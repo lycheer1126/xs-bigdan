@@ -28,6 +28,7 @@ WEBUI_DIR = PROJECT_ROOT / "runtime" / ".webui"
 PROCS_FILE = WEBUI_DIR / "procs.json"
 QUEUE_FILE = WEBUI_DIR / "queue.json"
 GROUPS_FILE = WEBUI_DIR / "groups.json"
+MARKS_FILE = WEBUI_DIR / "marks.json"
 BIGDAN_ENTRY = PROJECT_ROOT / "bigdan.py"
 
 DEFAULT_JOB_TIMEOUT = 3600  # 与 bigdan.py 默认一致(60 分钟，真实目标侦察+验证以小时计)
@@ -680,6 +681,54 @@ def assign_job(job_id: str, group: str) -> None:
         if group:
             groups.setdefault(group, []).append(job_id)
         _save_groups_raw(raw)
+
+
+# ---------------------------------------------------------------- 有效标记（SRC 已确认有效的漏洞追踪）
+
+_marks_lock = threading.RLock()
+
+
+def _load_marks_raw() -> dict:
+    if MARKS_FILE.is_file():
+        try:
+            return json.loads(MARKS_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+    return {}
+
+
+def _save_marks_raw(data: dict) -> None:
+    WEBUI_DIR.mkdir(parents=True, exist_ok=True)
+    MARKS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def list_marks() -> dict:
+    """全部有效标记:{"jobs": {job_id: {"task": true/false, "vulns": {"漏洞类型": true}}}}。"""
+    raw = _load_marks_raw().get("jobs") or {}
+    return {"jobs": raw}
+
+
+def toggle_mark(job_id: str, scope: str, key: str = "") -> dict:
+    """切换标记:scope=task 任务级确认✓;scope=vuln 按漏洞类型 key 点亮/熄灭。返回新状态。"""
+    if not valid_job_id(job_id):
+        raise ValueError("非法任务 ID")
+    if scope not in ("task", "vuln"):
+        raise ValueError("scope 须为 task 或 vuln")
+    with _marks_lock:
+        raw = _load_marks_raw()
+        jobs = raw.setdefault("jobs", {})
+        m = jobs.setdefault(job_id, {"task": False, "vulns": {}})
+        if scope == "task":
+            m["task"] = not m.get("task", False)
+        else:
+            key = (key or "").strip()
+            if not key:
+                raise ValueError("vuln 标记需要漏洞类型 key")
+            v = m.setdefault("vulns", {})
+            v[key] = not v.get(key, False)
+        _save_marks_raw(raw)
+    return {"job_id": job_id, "scope": scope, "key": key,
+            "state": m["task"] if scope == "task" else m.setdefault("vulns", {}).get(key, False)}
 
 
 def group_of(job_id: str) -> str:
