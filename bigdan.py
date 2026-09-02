@@ -225,7 +225,7 @@ PHASE_READ_INDEX = {
         ("references/decision-trees/README.md", "参数特征命中→先读索引再精读对应§决策树小文件(29棵,防上下文泛滥)"),
         ("skills/hunt_ssrf/SKILL.md", "SSRF 狩猎手册:URL类参数优先测(低成本高价值,OOB确认→云元数据表→绕过变体→盲打三连)"),
         ("references/403-bypass-complete.md", "访问屏障处理(mastermind Phase 4):遇 403/401 按序尝试 路径操纵→方法切换→Header注入→协议降级→组合;无屏障则 digest 写 SKIPPED"),
-        ("references/breakthrough-shortlist.md", "现场手法库:认证绕过/IDOR别停/对象存储矩阵/云IDE链/对话口工具执行(对得上特征就打,假点列防误报)"),
+        ("references/breakthrough-shortlist.md", "现场手法库:认证绕过/IDOR别停/对象存储矩阵/云IDE链/对话口工具执行(对得上特征才打,打一条记一条到 _linkage_results.jsonl——与端点覆盖账本联动,防手法被浏览不执行)"),
     ],
     "deep": [  # 🟡 条件阶段: JWT/加密/端点榨干（无 JWT 且无加密体→跳过并写 digest）
         ("skills/jwt_attack/SKILL.md", "发现 JWT 时:全攻击链(alg:none/弱密钥/kid/RS256→HS256)"),

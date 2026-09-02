@@ -2,6 +2,8 @@
 
 > 格式：认什么 → 打哪 → 出什么算成 → 假点。进站对得上就按此打，**假点列是防误报的命门**。
 > 本表是"现场手法库"，不是扫描清单——对得上特征才打，对不上不硬套。
+> **执行纪律：命中特征 → 打 → 结果写 `_linkage_results.jsonl`（hit 或 skipped）——与端点覆盖账本联动，
+> 手法必须被执行并被记录，不能只是浏览。**
 
 ## 一、认证绕过现场手法（authbypass 精选）
 
@@ -9,7 +11,7 @@
 |---|---|---|---|
 | 改密口 body 吃旧密/验码字段+新密+身份 id | 旧密/验码**置空或省略**提交；报"与历史密码重复"=已写库证明 | 改掉别人的密(过了立刻改回) | 只回 0 没写库 |
 | IDaaS 密保题未占用 id；匿名可提交 | 匿名签发 scope=`_` 的 JWT → 写未占用密保题 → verify 换 reset scope → set_password | 改别人密码 | Success 但登录走另一套 IdP |
-| 验签失败时 GET/DELETE/OPTIONS/HEAD 的 **Location 或 msg 带 `calculateSign is:`** | 假签打签约/下单口，从 Location 抄服务端刚算的合法签 → 打查询 | 合法签过查询口 | 没有回显签 |
+| 验签失败时 GET/DELETE/OPTIONS/HEAD 的 **Location 或 msg 带 `calculateSign is:`** | 假签打签约/下单口，**GET 先看 Location**（有的网关 GET 自己就 302 漏签），换 METHOD 再试，抄服务端刚算的合法签 → 打查询 | 合法签过查询口 | 没有回显签 |
 | 身份供应商代调（小程序码/OAuth 换票）；非法 pagepath/redirect_uri | 外域 redirect_uri 让下游 5xx 吐出 `client_secret=`；或未登录领票口直接 200 出票 | token/secret 能问出主体 | 报错只有 ErrCode；token 占位串 |
 | 未登录发签口给 IM/RTC userSig；identifier 跟请求走 | 不登录拿签登 IM 拉他人会话/群成员 | 拉到**他人**会话/明文手机 | 只能登游客 null；换 UserID 失败 |
 | 发签口回包 nonce 以 `MIIE`/`-----BEGIN` 开头 | **把 nonce 当 PKCS8 私钥 load** | 能 load 成 RSA 私钥 | nonce 只是短随机串 |
@@ -27,6 +29,8 @@
 | 详情 200 但 canAnswer=false | 看同包 savedConfigDraft 草稿 |
 | 换租户/换 id 401 | 附件 URL 只改租户字段（签名可能没罩住） |
 | 列表 401/空包/缺参报错 | **都不等于没口**——换方法/换参/换头再试 |
+| 作品/项目有 `period=edit|publish` 状态参 | 不登录打内容口 `period=edit`（publish 说已删除、edit 仍出正文才算） | 未发布正文 | 同 id publish 也出 |
+| 对外搜索口有 materialType/素材类型参 | 改内部市场/营销规范类型（对照公开橱窗类型差分） | SSO 墙后的内部物料名单/文件直链 | 出的是公开规范 |
 
 **换 id 不限字段名**：userId/uid/memberId/phone/回包抄的 id/0/-1/空都试；密文 id 从 JS 找公钥（modulus/exponent/JSEncrypt）自己加密相邻数字。
 
@@ -34,7 +38,9 @@
 
 | 认什么 | 打哪 | 算成 | 假点 |
 |---|---|---|---|
-| STS 凭证字段有 filename/key/prefix | 填 `*`/空/`/`；对象 key 是文件 md5 从 JS 搜 md5sum | 覆盖他人对象/列出并删别人 key | `*` 只到废桶；覆盖 403 |
+| STS 凭证字段有 filename/key/prefix | 填 `*`/`**`/空/`/`（**一个 `*` 常落空桶、两个以上才命中业务桶**）；assumerole 场景后段 Policy 常盖前段；对象 key 是文件 md5 从 JS 搜 md5sum | 覆盖他人对象/列出并删别人 key | `*` 只到废桶；覆盖 403 |
+| 落地页写死 supabase/nocode `role=anon` JWT；rest 表 403 | 带 apikey+Bearer 打 `POST /storage/v1/object/{桶}/{官方前缀/探测key}`；同对象名再 POST 加 **`x-upsert: true`** 改正文；官方图常在 use-cases/covers 前缀；打完 DELETE 探测文件 | 官方同前缀对象能被盖（同前缀能盖自己刚传的=官方同样能盖） | 只能盖自己的 key |
+| STS List/Delete 403 | **别停**——对任意 key GET/PUT；领钥 XHR 不带登录头也打 | 通配钥能读写任意 key | 只有自己的前缀 |
 | 带签 URL 的 SignedHeaders 没有 host | 域名换同账号另一桶 + `?uploads` 分片列举 | 列出别的桶 | 签名罩住 Host |
 | 对象内容可控但 Content-Type 卡死；有临时钥 | 签一枪带 `response-content-type=text/html` | 浏览器当 HTML 执行=存储 XSS | 签名拒此参 |
 | webpack/JS 里有永久 AK/SK | 自己算 POST policy（expiration 拉长）；假签对照 `SignatureDoesNotMatch` | 真钥能写桶 | 钥已吊销 |
