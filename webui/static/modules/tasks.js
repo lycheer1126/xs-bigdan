@@ -56,7 +56,8 @@ XSModules.tasks = (() => {
       <button class="btn sm detail-btn" data-id="${XS.esc(j.id)}">详情</button>
       ${j.state === "running" ? `
         <button class="btn sm danger stop-btn" data-id="${XS.esc(j.id)}">停止</button>` : `
-        ${j.state === "blocked" ? `<button class="btn sm hint-btn" data-id="${XS.esc(j.id)}">提供线索</button>` : ""}
+        ${j.state !== "queued" ? `<button class="btn sm hint-btn" data-id="${XS.esc(j.id)}"
+          title="续跑前提供线索/测试重点/账号——点「续跑」后注入 BRIEF">提供线索</button>` : ""}
         ${j.state === "queued" ? "" : `<button class="btn sm resume-btn" data-id="${XS.esc(j.id)}">续跑</button>`}
         <button class="btn sm danger del-btn" data-id="${XS.esc(j.id)}">${j.state === "queued" ? "取消" : "删除"}</button>`}`;
     return `
@@ -178,8 +179,8 @@ XSModules.tasks = (() => {
       <div class="modal-head">提供线索 <span class="x">✕</span></div>
       <div class="modal-body">
         <p class="muted" style="font-size:12.5px;margin-bottom:8px">
-          Agent 请求人工输入（BLOCKED）。提供测试账号 / 授权确认 / 下一步提示，
-          点「续跑」后线索会注入任务简报，Agent 优先处理。</p>
+          提供测试账号 / 授权确认 / 下一步测试重点，点「续跑」后线索会注入任务简报，
+          Agent 优先处理。待人工任务=Agent 卡住等你；中断/超时/已完成任务=续跑前补充方向。</p>
         <textarea id="hint-text" spellcheck="false" placeholder="如：测试账号 user01 / pass123（仅用于越权验证）；该资产在授权范围内；验证码需要真实手机号…"
           style="width:100%;min-height:110px;font-family:var(--mono);font-size:12.5px"></textarea>
       </div>
@@ -497,7 +498,7 @@ XSModules.tasks = (() => {
           ${state === "running" ?
             `<button class="btn danger" id="d-stop">停止</button>` :
             `<button class="btn primary" id="d-resume">续跑</button>`}
-          ${state === "blocked" ? `<button class="btn" id="d-hint" style="color:var(--warn);border-color:var(--warn)">提供线索</button>` : ""}
+          ${state !== "running" && state !== "queued" ? `<button class="btn" id="d-hint" style="color:var(--warn);border-color:var(--warn)" title="续跑前提供线索/测试重点/账号">提供线索</button>` : ""}
           <button class="btn" id="d-report" title="查看漏洞报告(无则先生成,中断/半成品任务也出)">报告</button>
           <button class="btn" id="d-open">打开目录</button>
           <button class="btn danger" id="d-del">删除</button>
