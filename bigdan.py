@@ -415,6 +415,49 @@ def _early_stop_gate(job_dir: Path) -> tuple[bool, str]:
     return True, ""
 
 
+def _evidence_delta(job_dir: Path, since_epoch: float) -> List[str]:
+    """本段产物增量清单:evidence/ 下 mtime 落在本段窗口内的文件名(任何落盘即算)。
+
+    判断依据:evidence/ 只放产品文件(指纹/契约/联动账本/漏洞证据/登录口探测),
+    真实测试工作必然落盘其一;纯对话输出不算产物。
+    """
+    ev = job_dir / "evidence"
+    if not ev.is_dir():
+        return []
+    touched: List[str] = []
+    try:
+        for p in ev.iterdir():
+            if not p.is_file():
+                continue
+            if p.stat().st_mtime >= since_epoch - 2:  # 2s 容忍时钟/写入粒度
+                touched.append(p.name)
+    except OSError:
+        return []
+    return sorted(touched)
+
+
+def _segment_min_product(job_dir: Path, seg_start_epoch: float,
+                         findings_before: int, findings_now: int) -> tuple[bool, str]:
+    """段级最小产物门(2026-09 根治"静默早退")——措辞检测的机械补位。
+
+    背景:travix/record/sign.58 案例——模型段内 1-2 分钟输出一份不含投降词的
+    正常 digest 即不再调用工具,pi 视无工具回复为回合完成(exit 0,协议正确行为);
+    harness 侧早停/投降检测全依赖措辞("建议结束"/放弃词),模型不写就全线绕过,
+    3 段耗尽零产物照常出空报告。修复:任何真实工作都会在 evidence/ 落盘或注册
+    FINDING,产物增量不可绕过——段必须留下增量,否则并入投降 retry 机制强制补段。
+
+    豁免(由调用方判定,本函数只管产物):digest 含"建议结束"(走早停机械裁决)、
+    BLOCKED(凭证门)、超时 124(预算烧尽非模型早退)。
+    """
+    if findings_now > findings_before:
+        return True, ""
+    touched = _evidence_delta(job_dir, seg_start_epoch)
+    if touched:
+        return True, ""
+    return False, ("本段零产物增量即收工(evidence/ 无任何新增/更新文件、无新注册 FINDING)"
+                   "——真实测试必落盘,静默早退不合法")
+
+
 def _credential_gate_ok(job_dir: Path) -> bool:
     """凭证门(BLOCKED AUTH_CREDENTIALS)前置门槛:无认证面已测过的落盘证据。
 
@@ -1022,8 +1065,11 @@ def build_user_prompt(target: dict, seg_idx: int, segs: int, timeout_sec: int) -
     tail = (
         f"\n\n## 本段收工要求\n"
         f"- 有可确认漏洞 → 写证据文件 + 打印 FINDING 行。\n"
-        f"- 无论有无发现，收工前输出 `### RECON_DIGEST` 结构化摘要（格式见 system prompt）。\n"
-        f"- 若本段已把全部攻击面试完且无新线索，可在 digest 里说明『建议结束』，"
+        f"- 测试结果必须记账落盘(联动结果写 _linkage_results.jsonl,探测结论写 evidence/ 文件)——"
+        f"每段收工前必须留下产物增量(evidence/ 下新增或更新文件,或注册新 FINDING);"
+        f"零产物收工会被机械门判为静默早退并强制补段(最多 2 次),纯文字总结不算产物。\n"
+        f"- 无论有无发现,收工前输出 `### RECON_DIGEST` 结构化摘要(格式见 system prompt)。\n"
+        f"- 若本段已把全部攻击面试完且无新线索,可在 digest 里说明『建议结束』,"
         f"调度器会提前停止后续段。"
     )
     return head + tail
@@ -1094,6 +1140,7 @@ def run_target(
         log_path = job_dir / f"session-{seg_no}.log"
         tag = target["id"]
         seg_start_epoch = time.time()  # jsonl 兜底的陈旧镜像门槛基线
+        findings_before = len(summary["findings"])  # 段级最小产物门:本段 FINDING 增量基线
 
         runlog(job_dir, "segment_start", {"seg": seg_no, "budget_sec": seg_to, "phase": phase})
         log(f"=== [{tag}] 段 {seg_no}/{segs} 开始 {datetime.now().strftime('%H:%M:%S')} "
@@ -1186,17 +1233,31 @@ def run_target(
                 summary["blocked"] = True
                 runlog(job_dir, "blocked", {"seg": seg_no})
 
-        # 投降检测(mastermind retry_detector):agent 过早收手 → 下一段强制重试
+        # 投降/静默早退检测:措辞信号(mastermind retry_detector)+ 段级最小产物门(2026-09)
+        # 两路命中任一 → 下一段强制补段(共享 retry-prompt 队列,共限 2 次防死循环)
         if not summary["early_stop"] and not summary["blocked"]:
             detect_text = digest or log_text[-2500:]
             surr = detect_surrender(detect_text)
-            if surr["should_retry"]:
+            categories = list(surr["categories"])
+            # 产物门豁免:超时(预算烧尽非早退)/ digest 含建议结束(早停机械裁决接管,
+            # 被拒时 earlystop-deny-*.txt 已注入下段头部,无需重复注入)
+            dig_suggest_end = bool(digest) and "建议结束" in digest
+            if exit_code in (0, 1) and not dig_suggest_end:
+                ok, why = _segment_min_product(job_dir, seg_start_epoch, findings_before, len(summary["findings"]))
+                if not ok:
+                    categories.append({"category": "no_product", "severity": "critical", "matched": why})
+            if categories:
                 existing = sorted(job_dir.glob("retry-prompt-*.txt"))
                 if len(existing) < 2:  # 最多 2 次强制重试,之后允许自然收工
-                    retry_prompt = build_retry_prompt(surr["categories"], seg_no)
+                    retry_prompt = build_retry_prompt(categories, seg_no)
                     (job_dir / f"retry-prompt-{seg_no}.txt").write_text(retry_prompt, encoding="utf-8")
-                    runlog(job_dir, "retry", {"seg": seg_no, "categories": [c["category"] for c in surr["categories"]]})
-                    log(f"=== [{tag}] 段 {seg_no} 检测到放弃信号({surr['top_category']}),已注入重试指令到下一段 ===")
+                    runlog(job_dir, "retry", {"seg": seg_no, "categories": [c["category"] for c in categories]})
+                    log(f"=== [{tag}] 段 {seg_no} 检测到{'静默早退(零产物增量)' if categories[-1]['category'] == 'no_product' and len(categories) == 1 else '放弃信号(' + surr['top_category'] + ')'},已注入强制补段指令到下一段 ===")
+                elif categories[-1]["category"] == "no_product":
+                    # retry 额度已尽仍连续零产物 → 措辞提示已无效,标记疑似模型行为漂移
+                    runlog(job_dir, "note", {"seg": seg_no,
+                                             "msg": "连续零产物收工(静默早退)且强制补段额度已尽——疑似模型行为漂移,报告前人工核对 runlog"})
+                    log(f"=== [{tag}] ⚠️ 段 {seg_no} 连续零产物收工且补段额度已尽(疑似模型漂移),人工核对 runlog ===")
 
         seg_rec = {
             "seg": seg_no,

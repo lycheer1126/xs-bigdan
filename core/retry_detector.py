@@ -141,6 +141,10 @@ def build_retry_prompt(categories: List[dict], seg_no: int, hint: str = "") -> s
             lines.append("- 『没发现』不等于『不存在』:换面、换字典、换参数再验证一轮,给出具体测过的清单。")
         elif cat == "surrender":
             lines.append("- 换思路继续:从 evidence/ 已有产物找断点(差一步的疑似点优先),或读 knowledge/skills/vuln_classes/SKILL.md 找新攻击面。")
+        elif cat == "no_product":
+            lines.append("- 上段零产物增量即收工被机械门拦截:真实测试必须留下 evidence/ 落盘产物(指纹/契约/联动记录/漏洞证据文件)或注册 FINDING,纯文字总结不算。")
+            lines.append("- 本段第一优先:先按 BRIEF 当前阶段补齐最小产物并落盘(缺什么补什么:recon 段须 _fingerprint.md+契约,联动段须 _linkage_results.jsonl 记录,测试结果每条都记账),再继续新面。")
+            lines.append("- 若确实无面可测,请在 RECON_DIGEST 里写明『建议结束』(harness 会做机械裁决),不许零产物静默退出。")
         elif cat in BY_VULN_CLASS:
             lines.append(f"- {cat} 绕过建议: " + "; ".join(BY_VULN_CLASS[cat]))
     lines.append("- 若 3 轮重试后仍无进展,在 RECON_DIGEST 里写明『已穷尽:具体试过什么』,允许结束。")

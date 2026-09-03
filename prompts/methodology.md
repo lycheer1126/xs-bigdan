@@ -132,7 +132,9 @@
     Node→原型污染/SSRF, .NET→ViewState/反序列化, Struts2→OGNL(S2-045 等,见 cve-chains)
   - **参数语义选型**:数字参数→SQLi/整数边界, URL 参数→SSRF/开放重定向, 文本参数→XSS/SSTI,
     文件参数→上传/路径穿越, XML 提交→XXE——payload 形态随参数语义构造,示例:`id=3-1`/`${7*7}` 仅示意
-  - **盲打类一律 dnslog OOB 确认**(dnslog.cn 最快→Collaborator→interactsh),**禁止直打 127.0.0.1/
+  - **盲打类一律 dnslog OOB 确认**(dnslog.cn 最快,curl 无头三步可用:主页拿cookie→getdomain.php 得子域→
+    getrecords.php 查记录;被封/不稳 → interactsh-client(需 tools/bin 有) → 自有域名/自建;
+    **Burp Collaborator 不可用——agent 无 Burp,仅人工本机环境**),**禁止直打 127.0.0.1/
     169.254.x 等内网地址**(一打触发 WAF 拦截且打草惊蛇);OOB 回调确认后才做内网/元数据确认
   - **响应驱动**:每类探测 1-2 次,长度/耗时/内容变化决定下一步(差分信号→深挖,无差异→换思路)
   - **参数级最低矩阵**(有差分面的每个 filter 参数都要过,短枚举字段 vote/status 也测):
