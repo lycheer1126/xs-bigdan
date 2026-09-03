@@ -765,8 +765,8 @@ def list_jobs() -> list[dict]:
                 except (OSError, json.JSONDecodeError):
                     summary = None
             state = _classify(d.name, summary, running)
-            if state in ("created", "interrupted") and d.name in queued_ids:
-                state = "queued"  # 已入队待跑（排队中的新任务 / 排队等待续跑的断点）
+            if d.name in queued_ids and d.name not in running:
+                state = "queued"  # 已入队待跑（新建/中断/已完成/超时/待人工任务续跑排队一律显示排队中）
             if state == "created" and summary is None:
                 # 无 summary 但有运行痕迹 → 曾启动后被中断（段未写完 summary）
                 has_trace = (d / "BRIEF.md").is_file() or (d / "runlog.jsonl").is_file()
