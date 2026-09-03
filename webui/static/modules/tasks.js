@@ -336,8 +336,9 @@ XSModules.tasks = (() => {
         e.stopPropagation();
         if (!confirm(`确认续跑任务 ${b.dataset.id}？（断点续打，需 jobs/ 断点仍在）`)) return;
         try {
-          await XS.api(`/api/tasks/${b.dataset.id}/resume`, { method: "POST", json: {} });
-          XS.toast(`已开始续跑 ${b.dataset.id}`, "ok");
+          const r = await XS.api(`/api/tasks/${b.dataset.id}/resume`, { method: "POST", json: {} });
+          if (r.queued) XS.toast(`已加入队列排队，按顺序执行（${b.dataset.id}）`, "ok");
+          else XS.toast(`已开始续跑 ${b.dataset.id}`, "ok");
           renderList();
         } catch (err) { XS.toast(err.message, "error"); }
       }));

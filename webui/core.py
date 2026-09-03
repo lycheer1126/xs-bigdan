@@ -601,6 +601,13 @@ def _classify(job_id: str, summary: dict | None, running_ids: set) -> str:
     if summary and summary.get("blocked"):
         return "blocked"
     if summary and summary.get("ended_at"):
+        if not summary.get("timed_out"):
+            # 全段异常(如 pi 秒退 exit=1 连续失败)≠ 已完成——6 秒跑完 3 段全是失败,
+            # 标 done 会误导用户以为测完了;归为 interrupted(意外中断,可续跑)
+            segs = summary.get("segments") or []
+            codes = [s.get("exit_code") for s in segs if s.get("exit_code") is not None]
+            if codes and all(c not in (0, 124, 127) for c in codes):
+                return "interrupted"
         return "timed_out" if summary.get("timed_out") else "done"
     if summary and (summary.get("started_at") or summary.get("segments")):
         return "interrupted"
