@@ -251,14 +251,10 @@ PHASE_READ_INDEX = {
 # xs_auth/business_flow 无账号时读了白读还占上下文）
 # 条件名: has_account = BRIEF 注入了测试账号(creds) 或 任务目录有 cookies.txt
 PHASE_READ_INDEX_COND = {
-    "recon": [
-        ("skills/subdomain_takeover/SKILL.md", "子域枚举产出 CNAME 清单", "subdomains"),
-    ],
     "linkage": [
         ("skills/xs_auth/SKILL.md", "登录口逻辑审计手册(JS审计→定向验证→接管链)", "has_account"),
         ("skills/business_flow/SKILL.md", "登录态功能点遍历(四问框架+寻路四式+返回包地图)", "has_account"),
         ("skills/type_juggling/SKILL.md", "PHP 栈指纹确认+认证/签名比对接口", "php_stack"),
-        ("skills/subdomain_takeover/SKILL.md", "子域枚举产出 CNAME 清单", "subdomains"),
     ],
 }
 
@@ -478,12 +474,6 @@ def _php_stack_signal(job_dir: Path) -> bool:
             return True
     return False
 
-
-def _subdomains_signal(job_dir: Path) -> bool:
-    """子域枚举产出信号:任何证据文件含 CNAME 记录或子域清单特征。"""
-    ev = job_dir / "evidence"
-    if not ev.is_dir():
-        return False
     for f in ev.rglob("*"):
         if not f.is_file() or f.stat().st_size > 200_000:
             continue
@@ -640,7 +630,6 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
     cond_flags = {
         "has_account": has_account,
         "php_stack": _php_stack_signal(job_dir),
-        "subdomains": _subdomains_signal(job_dir),
     }
     for path, why, cond in PHASE_READ_INDEX_COND.get(phase, []):
         if cond_flags.get(cond):
