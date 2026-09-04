@@ -235,8 +235,13 @@ try:
           any("advanced-techniques" in p for p, _ in PHASE_READ_INDEX["highrisk"]))
     check("读取索引不膨胀:无条件层不含 xs_auth/business_flow(已移入条件层)",
           not any("xs_auth" in p or "business_flow" in p for p, _ in PHASE_READ_INDEX["linkage"]))
-    check("条件层登记 xs_auth/business_flow(has_account)",
-          all(c == "has_account" for _, _, c in PHASE_READ_INDEX_COND["linkage"]))
+    check("条件层登记:has_account 条目仍在(xs_auth/business_flow)",
+          any(c == "has_account" and "xs_auth" in p_ for p_, _, c in PHASE_READ_INDEX_COND["linkage"])
+          and any(c == "has_account" and "business_flow" in p_ for p_, _, c in PHASE_READ_INDEX_COND["linkage"]))
+    check("条件层登记:特征触发条目判定函数已实现(php_stack/subdomains)",
+          {"has_account", "php_stack", "subdomains"} >= {c for _, _, c in PHASE_READ_INDEX_COND["linkage"]}
+          and hasattr(bigdan_mod, "_php_stack_signal") and hasattr(bigdan_mod, "_subdomains_signal"))
+    import bigdan as bigdan_mod  # noqa: E402
     from core.report import _triage_check  # noqa: E402
     t_ok = _triage_check({"type": "信息泄露"},
                          "URL: http://x.com/api\n影响: 可读取用户手机号(前端已展示该数据)\n")
