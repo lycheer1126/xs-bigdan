@@ -224,8 +224,6 @@ PHASE_READ_INDEX = {
         ("references/response-chaining.md", "响应链方法论:A 返回值→B 输入"),
         ("references/decision-trees/README.md", "参数特征命中→先读索引再精读对应§决策树小文件(29棵,防上下文泛滥)"),
         ("skills/hunt_ssrf/SKILL.md", "SSRF 狩猎手册:URL类参数优先测(低成本高价值,OOB确认→云元数据表→绕过变体→盲打三连)"),
-        ("skills/subdomain_takeover/SKILL.md", "recon 子域枚举后:CNAME/NS/MX 悬挂记录接管(指纹表逐条核验)"),
-        ("skills/type_juggling/SKILL.md", "PHP 栈指纹+认证/签名比对接口:松散比较/魔法哈希绕过"),
         ("skills/api_gateway_bypass/SKILL.md", "网关 403 特征(Kong/Nginx/AWSGW):路径规范化/方法覆盖/版本回退绕过"),
         ("references/403-bypass-complete.md", "访问屏障处理(mastermind Phase 4):遇 403/401 按序尝试 路径操纵→方法切换→Header注入→协议降级→组合;无屏障则 digest 写 SKIPPED"),
         ("references/breakthrough-shortlist.md", "现场手法库:认证绕过/IDOR别停/对象存储矩阵/云IDE链/对话口工具执行(对得上特征才打,打一条记一条到 _linkage_results.jsonl——与端点覆盖账本联动,防手法被浏览不执行)"),
@@ -256,6 +254,8 @@ PHASE_READ_INDEX_COND = {
     "linkage": [
         ("skills/xs_auth/SKILL.md", "登录口逻辑审计手册(JS审计→定向验证→接管链)", "has_account"),
         ("skills/business_flow/SKILL.md", "登录态功能点遍历(四问框架+寻路四式+返回包地图)", "has_account"),
+        ("skills/type_juggling/SKILL.md", "PHP 栈指纹确认+认证/签名比对接口", "php_stack"),
+        ("skills/subdomain_takeover/SKILL.md", "子域枚举产出 CNAME 清单", "subdomains"),
     ],
 }
 
@@ -461,6 +461,35 @@ def _segment_min_product(job_dir: Path, seg_start_epoch: float,
                    "——真实测试必落盘,静默早退不合法")
 
 
+def _php_stack_signal(job_dir: Path) -> bool:
+    """PHP 栈信号:指纹/契约文件含 php/ThinkPHP/Laravel 线索。"""
+    for name in ("_fingerprint.md", "_endpoint_params.json"):
+        f = job_dir / "evidence" / name
+        if not f.is_file():
+            continue
+        try:
+            t = f.read_text(encoding="utf-8", errors="replace").lower()
+        except OSError:
+            continue
+        if any(k in t for k in (".php", "thinkphp", "laravel", "php/")):
+            return True
+    return False
+
+
+def _subdomains_signal(job_dir: Path) -> bool:
+    """子域枚举产出信号:recon 产物含 CNAME/子域清单内容。"""
+    for f in (job_dir / "evidence").glob("*"):
+        if not f.is_file() or f.stat().st_size > 200_000:
+            continue
+        try:
+            t = f.read_text(encoding="utf-8", errors="replace").lower()
+        except OSError:
+            continue
+        if "cname" in t and ("takeover" in t or "子域" in t or "subdomain" in t):
+            return True
+    return False
+
+
 def _credential_gate_ok(job_dir: Path) -> bool:
     """凭证门(BLOCKED AUTH_CREDENTIALS)前置门槛:无认证面已测过的落盘证据。
 
@@ -602,8 +631,13 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
     read_idx = list(PHASE_READ_INDEX.get(phase, PHASE_READ_INDEX["recon"]))
     # 条件注入层:has_account(账号/Cookie 注入)才注入 xs_auth/business_flow,否则不占上下文
     has_account = bool(creds) or (job_dir / "cookies.txt").is_file()
+    cond_flags = {
+        "has_account": has_account,
+        "php_stack": _php_stack_signal(job_dir),
+        "subdomains": _subdomains_signal(job_dir),
+    }
     for path, why, cond in PHASE_READ_INDEX_COND.get(phase, []):
-        if cond == "has_account" and has_account:
+        if cond_flags.get(cond):
             read_idx.append((path, why))
     idx_lines = "\n".join(
         f"- `{knowledge_dir.as_posix()}/{path}` — {why}"
