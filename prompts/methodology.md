@@ -296,6 +296,9 @@
 | knowledge/references/api-fuzz-payloads.md | Fuzz payload 模板 |
 | knowledge/references/biz-mutations.md | 登录态业务参数扰动字典(七族:状态翻转/类型替换/数量边界/置空删除/结构注入/身份替换/编码探针,命中即停) |
 | knowledge/references/api-testing-methodology.md | API 测试方法论 |
+| knowledge/references/ai-security-vulnforge.md | 目标是 AI/LLM 应用且需完整方法论(Prompt注入/越狱/MCP/Agent滥用/RAG投毒/沙箱逃逸全流程) |
+| knowledge/references/js-analysis-vulnforge.md | Phase 0-1 JS 分析与源泄露的完整流程手册(端点提取/密钥挖掘/source leak 检索) |
+| knowledge/references/security-testing-methodology.md | 攻击面收尽仍无发现时:换思维框架重盘(L1-L4金字塔/WooYun 漏洞本质公式) |
 | knowledge/references/403-bypass-complete.md | 403 绕过全集 |
 | knowledge/references/breakthrough-shortlist.md | 现场手法库:认证绕过/IDOR别停/对象存储矩阵/云IDE链/对话口工具执行(对得上特征就打,假点列防误报) |
 | knowledge/references/advanced-techniques.md | 冷门高命中:幽灵位/WAF厂商矩阵/反序列化指纹/类型混淆/EL注入/XOR藏钥/缓存欺骗/竞态H2单包 |
