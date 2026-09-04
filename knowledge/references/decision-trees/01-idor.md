@@ -1,4 +1,7 @@
 # §1 IDOR（越权）
+
+> **IDOR 类权威**：本树是 IDOR 的唯一权威（无独立 skill）。框架层见 business_flow §问3，
+> 纪律见 src-discipline §2（先加后清），现场别停表见 breakthrough-shortlist §二。
 ### 识别信号
 - 请求含资源 ID：`userId id uid orderId fileId docId accountId`
 - **列表类端点**（一请求返回全量数据）：`getuserlist /user/list /getAllUser /api/user/info(无参) /admin/user/list`
@@ -124,3 +127,35 @@ m) 同源功能点参数推测隐藏接口:
 ```
 ### 关联漏洞
 - 筛选绕过/泛查询 → §23
+
+
+## 常见绕过技巧（clown idor-test 提炼）
+
+### ID 猜测
+```
+数字 ID: ±1, ±10, 0, -1, 999999
+租户/应用字段被拦后: 0 / -1 / 空 / 不传（哨兵租户，短表有指针）
+UUID: 从响应或 JS 中收集其他用户 UUID
+手机号: 某些接口直接以手机号为标识
+```
+
+### 参数污染（同名多值）
+```
+POST /api/user/info?userId=A&userId=B
+URL 带 ?userId=B + body 再带 userId=A（双层不同值）
+```
+
+### 路径遍历式换资源
+```
+/api/user/A/orders → /api/user/B/orders
+/api/order/123 → /api/order/124,125,...
+```
+
+### 编码变体
+```
+12345 → 0x3039(hex) → %31%32%33%34%35(URL编码)
+```
+
+### 证据收集规范
+1. 请求完整内容（含 token/headers）2. 响应完整内容（含越权数据）3. 自己 vs 越权的对照。
+越权数据 ≤5 条（合规红线），超出部分打码不落盘。
