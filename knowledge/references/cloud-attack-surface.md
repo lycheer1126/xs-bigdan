@@ -214,32 +214,8 @@ Phase 4 Exploit:
 
 *End of cloud-attack-surface.md*
 
-## 8. 云元数据服务 (SSRF → 元数据 → 临时凭证 → 接管)
+## 8. 云元数据服务（SSRF → 元数据 → 临时凭证 → 接管）
 
-> 来源: 2026-08 实战众测报告(小程序 userAvatar SSRF → 腾讯云元数据 → CAM STS 泄露), 详见 knowledge/experience/ssrf.md 案例2
-
-### 腾讯云 CVM/EKS 元数据
-- 端点: `http://metadata.tencentyun.com`(**非** 169.254.169.254; 仅云主机内网可达——SSRF 能拉到 = 后端在腾讯云上)
-- 根目录: `1.0/` `2017-09-19/` `latest/` `meta-data/`
-- **CAM 角色临时凭证**: `http://metadata.tencentyun.com/meta-data/cam/role-security-credentials/<角色名>`
-  → 返回 `{"TmpSecretId":"AKID...","TmpSecretKey":"...","TmpToken":"..."}`(角色名常见 TKE_QCSLinkedRoleIn* 形态, 顺带泄露基础设施信息)
-- **实战验证端点清单**(荣耀低代码 SSRF 案例): `/latest/meta-data/public-keys/0/openssh-key`(SSH公钥) /
-  `/latest/meta-data/volumes`(实例存储) / `/latest/meta-data/instance-name`(实例名) / `/latest/meta-data/local-ipv4`(内网IP)
-- **短链绕过黑名单**: SSRF 防护拦云厂商域名/IP 时, 用第三方短链服务(dzxf119.cn 类)把元数据 URL 转短链 →
-  短链域名不在黑名单 → 服务端代理请求短链 → 302 → 元数据。同族: 重定向跳转/十进制 IP/DNS rebinding
-
-### Store-and-Read SSRF(把盲打变回显的实战技巧)
-特征功能组合: **用户提交 URL(头像/水印/导入) → 服务端拉取 → 拉取结果存储 → 存储路径可公开访问(CDN/OSS)**
-```
-1. userAvatar 改为元数据地址(或任意内网 URL)
-2. 服务端拉取后存储 → 响应回显 CDN 存储路径(如 user_avatar/<随机>.jpg)
-3. GET cdn域名/user_avatar/<随机>.jpg → 读到 SSRF 拉取的内容(含内网响应)
-```
-
-### 适用信号
-- 登录/资料请求含 userAvatar/avatarUrl/url 等服务端会拉取的字段
-- 响应头 Server: tencent-ci / x-cos-request-id / CDN 路径形态 → 腾讯云 COS/CI 后端
-- 阿里云对应: 100.100.100.200/meta-data/; AWS: 169.254.169.254/latest/meta-data/
-
-### 合规红线
-拿到 TmpSecretId/TmpToken 即停并报告(证明可达即可), **禁止实际调用云 API、禁止读取 COS 数据**(TIER 3)
+> ⚠️ 2026-09 收敛：本节细节已并入 `knowledge/skills/hunt_ssrf/SKILL.md`（§3 云元数据表 + §5b 路径差 + §6 盲打三连），
+> 该手册为 SSRF 唯一权威。本文件保留云存储本体的攻击链（§1-7），SSRF 相关只留案例指针：
+> 完整攻击路径见 `knowledge/experience/ssrf.md` 案例 2（userAvatar → 腾讯云元数据 → CAM STS 泄露）。

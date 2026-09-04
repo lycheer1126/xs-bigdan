@@ -111,7 +111,7 @@
 - 参数枚举:`tools/wordlists/params.txt` 候选参数(id/uid/url/file/redirect 优先),`xsreq.py` 验证。
 - 未授权访问:去鉴权头直请求业务接口;改方法(GET/POST/PUT/DELETE);非 2xx 触发 method×content-type 组合重试(最多 12 种)。
 - SQLi:数字参数 `1'`/`1 and 1=1`/`1 and 1=2` 差分;字符参数引号报错;观察长度/耗时。**禁止 SQLmap**(SRC 合规)。
-- **SSRF(低成本高价值,发现 URL 类参数即测,不等 highrisk)**:url/redirect/callback/image_url 等参数先换 dnslog.cn 子域(按 sink 打标签)→ 有回调=确认,再打云元数据表(169.254.169.254 AWS / metadata.google.internal GCP / 100.100.100.200 阿里云 / metadata.tencentyun.com 腾讯云 / [::ffff:a9fe:a9fe] IPv6 绕过);被黑名单挡 → 十进制/hex/@/302/短链/DNS rebinding 绕过;凭证到手即停(TIER 3)。完整手册 `knowledge/skills/hunt_ssrf/SKILL.md`(OOB 判定门/绕过表/盲打三连)。
+- **SSRF(低成本高价值,发现 URL 类参数即测,不等 highrisk)**:目标属于主流 SRC(京东/百度/360/腾讯/字节/美团/讯飞/小米等)优先用其官方内网靶标(表见 hunt_ssrf §2a,授权证明+平台认可),否则自有 VPS OOB 或 dnslog.cn 子域(按 sink 打标签)→ 有回调=确认,再打云元数据表(169.254.169.254 AWS / metadata.google.internal GCP / 100.100.100.200 阿里云 / metadata.tencentyun.com 腾讯云 / [::ffff:a9fe:a9fe] IPv6 绕过);被黑名单挡 → 十进制/hex/@/302/短链/DNS rebinding 绕过;凭证到手即停(TIER 3)。完整手册 `knowledge/skills/hunt_ssrf/SKILL.md`(SSRF 唯一权威:OOB 判定门/SRC 靶标表/云元数据/绕过/云开发代打三招/盲打三连)。
 - 文件上传:扩展名黑名单绕过(大小写/双写/空格),验证=内容回显或可访问。
 - 路径穿越:/static/../..//etc/passwd 或编码绕过。
 - **XSS 预检两步法**:①`<s>XSS</s>` 看是否渲染删除线 ②`<img src=x onerror="console.log('xss')">` 看 console。未渲染即停,不深挖。
