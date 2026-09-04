@@ -267,6 +267,9 @@
 | knowledge/skills/ai_chat_xss/SKILL.md | AI 对话/聊天类目标(前端 XSS 升级链: self-XSS→存储型→IPC 接管,同构通杀) |
 | knowledge/skills/xs_auth/SKILL.md | 存在登录口/认证逻辑审计需求(账号池注入后优先读:JS审计→定向验证→接管链,含 OAuth/找回密码白名单) |
 | knowledge/skills/business_flow/SKILL.md | BRIEF 注入账号/Cookie 后的登录态业务面(四问框架/寻路四式/返回包地图/XSS冷门落点/钱权益状态机) |
+| knowledge/skills/subdomain_takeover/SKILL.md | 子域枚举产出 CNAME 清单时:悬挂记录接管(指纹表+NS/MX 高价值变体) |
+| knowledge/skills/type_juggling/SKILL.md | PHP 栈(指纹确认)+认证/签名/token 比对接口:松散比较与魔法哈希 |
+| knowledge/skills/api_gateway_bypass/SKILL.md | 网关 403 特征或 /api/ 前缀受保护路由:路径规范化/方法覆盖/版本回退 |
 | knowledge/skills/hunt_ssrf/SKILL.md | 发现 URL 类参数/上传审核转存/头像/低代码调试/Webhook/链接预览时(SSRF 低成本高价值,linkage 阶段优先测:OOB→云元数据→绕过) |
 
 **References(查证资料,特征命中即读):**
@@ -275,6 +278,7 @@
 | knowledge/references/fingerprint-mapping.md | Phase 0 必读(指纹→测试映射+WAF 签名) |
 | knowledge/references/js-extraction-regexes.md | Phase 1 JS 落盘后:敏感信息 grep 模式库(FindSomething+雪瞳合集,漏抓就往表里加) |
 | knowledge/references/compliance-rules.md | Phase 0 + 报告前(SRC 合规 TIER 分级) |
+| knowledge/references/src-discipline.md | 测试行为红线唯一权威(会话纪律/先加后清/类型取舍/禁停工请示;与报告三闸互补) |
 | knowledge/references/decision-trees/README.md | Phase 2-3 参数特征命中:先读索引,再精读对应§决策树小文件(29棵) |
 | knowledge/references/response-chaining.md | Phase 2-5 响应链方法论 |
 | knowledge/references/discovery-amplification.md | Phase 2(端点→同类路径/参数榨干) |
