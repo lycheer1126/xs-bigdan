@@ -251,6 +251,9 @@ PHASE_READ_INDEX = {
 # xs_auth/business_flow 无账号时读了白读还占上下文）
 # 条件名: has_account = BRIEF 注入了测试账号(creds) 或 任务目录有 cookies.txt
 PHASE_READ_INDEX_COND = {
+    "recon": [
+        ("skills/subdomain_takeover/SKILL.md", "子域枚举产出 CNAME 清单", "subdomains"),
+    ],
     "linkage": [
         ("skills/xs_auth/SKILL.md", "登录口逻辑审计手册(JS审计→定向验证→接管链)", "has_account"),
         ("skills/business_flow/SKILL.md", "登录态功能点遍历(四问框架+寻路四式+返回包地图)", "has_account"),
@@ -477,15 +480,18 @@ def _php_stack_signal(job_dir: Path) -> bool:
 
 
 def _subdomains_signal(job_dir: Path) -> bool:
-    """子域枚举产出信号:recon 产物含 CNAME/子域清单内容。"""
-    for f in (job_dir / "evidence").glob("*"):
+    """子域枚举产出信号:任何证据文件含 CNAME 记录或子域清单特征。"""
+    ev = job_dir / "evidence"
+    if not ev.is_dir():
+        return False
+    for f in ev.rglob("*"):
         if not f.is_file() or f.stat().st_size > 200_000:
             continue
         try:
             t = f.read_text(encoding="utf-8", errors="replace").lower()
         except OSError:
             continue
-        if "cname" in t and ("takeover" in t or "子域" in t or "subdomain" in t):
+        if "cname" in t or "subdomain" in t or "子域" in t:
             return True
     return False
 
