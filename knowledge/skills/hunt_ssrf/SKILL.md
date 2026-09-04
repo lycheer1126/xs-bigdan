@@ -96,23 +96,29 @@ link preview_url avatar_url userAvatar webhook_url image_url cover_url return_ur
 **用法纪律**：目标属于表内 SRC → 靶标 URL 直接当参数值打，有回显截图、无回显记录时间；
 目标不在表内 → 用 §2b/§2c 通用通道。靶标只用于"证明 SSRF 存在"，不用于升级利用。
 
-### 2b. 自有 VPS OOB 通道（**通用首选**——完全可控、可抓完整请求、可部署 302 跳转）
+### 2b. 自有 VPS OOB 通道（通用首选——但有硬性前提，见红线）
 
-你有自己的 VPS 时优先用它替代公共 dnslog（公共面板他人可见、且无法承载 302 跳转/HTTP 回显）：
+> ⚠️ **红线：OOB 接收机绝不能与扫描机是同一台机器。**
+> 当前 xs-bigdan 若部署在云服务器上，**禁止**把该服务器自身 IP 当回调地址——
+> 目标回调 = 目标反向触碰你的扫描基础设施（SSRF 升级链 302/gopher 会反向打自己），
+> 且 http.server 残留进程/端口会污染后续任务的资产判定。**先在另一台 VPS 上部署监听器再用本节。**
+
+前提满足（有独立的监听 VPS）时的用法——完全可控、可抓完整请求、可部署 302 跳转：
 
 ```bash
-# 最简 DNS+HTTP 双通道监听（VPS 上跑）:
+# 监听 VPS 上(不是扫描机!):
 python -m http.server 80                      # HTTP 回显: curl http://vps-ip/probe-<sink>
-# DNS: 域名 NS 指到 VPS,抓 dns 查询日志(或者直接用 vps-ip 的 A 记录看服务端是否解析)
+# DNS: 域名 NS 指到监听 VPS,抓 dns 查询日志
 
 # 按 sink 打标签(与公共 dnslog 同纪律):
 http://<vps-ip>/probe-img    http://<vps-ip>/probe-import    # 哪个路径被请求=哪个 sink 出网
 
-# VPS 独有优势——302 跳转链(§4 绕过)与 HEAD/GET 分流:
+# 监听 VPS 独有优势——302 跳转链(§4 绕过)与 HEAD/GET 分流:
 #   HEAD 返回 200 过预检,GET 302 跳内网/元数据(把 <TGT> 换成 169.254.169.254 或内网地址)
 ```
 
-VPS HTTP 日志能看到**服务端来源 IP 与 UA**——顺带完成内网出口测绘（台账案例 1：多网段回连=分布式审计集群）。
+监听 VPS 的 HTTP 日志能看到**服务端来源 IP 与 UA**——顺带完成内网出口测绘（台账案例 1：多网段回连=分布式审计集群）。
+**判定自检**：写 FINDING 前确认回调地址的 IP ≠ 本机出口 IP（`curl -s ifconfig.me` 对照），一致即换通道。
 
 ### 2c. 公共 dnslog（无 VPS 时的兜底）
 
