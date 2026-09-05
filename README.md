@@ -61,7 +61,7 @@
 
 | 门 | 证据（落盘文件） |
 |---|---|
-| recon → linkage | `_endpoint_params.json` 存在 + JS 分析完整度 ≥0.8 + 端点 ≥3 |
+| recon → linkage | `_endpoint_params.json` 存在 + JS 分析完整度 ≥0.8 + 端点 ≥3（契约完整但端点 <3 → 小站豁免放行，纯静态小站不死锁在 recon） |
 | linkage 开工 | `_fingerprint.md` 存在（WAF 状态已确认） |
 | linkage 有产出 | `_linkage_results.jsonl` ≥1 条 |
 | → deep | 无 JWT 且无加密体 → 跳过 |

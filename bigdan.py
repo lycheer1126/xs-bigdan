@@ -315,6 +315,9 @@ def _recon_gate(job_dir: Path) -> tuple[bool, str]:
     """recon 门:契约文件存在 + completeness≥0.8 + 有效端点≥3（与 methodology 总览同一份清单）。
 
     质量抽查(2026-09 加固):有效端点 = path 非空字符串——空壳端点({"path":""})不算数。
+    小站豁免(2026-09):契约存在且 completeness≥0.8 但有效端点 <3 → JS 已榨干、站点确实小,
+    按实际攻击面放行——纯静态小站不再死锁在 recon 烧预算。底线:至少 1 个真实端点,
+    全空壳契约(0 端点)视为 JS 分析未产出,豁免不适用。
     """
     ep = job_dir / "evidence" / "_endpoint_params.json"
     if not ep.is_file():
@@ -330,7 +333,10 @@ def _recon_gate(job_dir: Path) -> tuple[bool, str]:
     if not isinstance(comp, (int, float)) or comp < 0.8:
         return False, f"契约 completeness={comp}(<0.8,JS 分析未达标)"
     if n_ep < 3:
-        return False, f"契约有效端点={n_ep}(<3)"
+        if n_ep >= 1:
+            return True, (f"小站豁免:契约完整(completeness={comp})但仅 {n_ep} 端点(<3)"
+                          f"——JS 已榨干,按实际攻击面放行")
+        return False, "契约有效端点=0(全是空壳)——JS 分析未产出可用攻击面,小站豁免不适用"
     return True, f"契约完整:{n_ep} 端点/completeness={comp}"
 
 
