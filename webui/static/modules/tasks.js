@@ -12,6 +12,7 @@ XSModules.tasks = (() => {
   let logAuto = true;
   let logFile = "";
   let groupFilter = "";  // 看板分组筛选: ""=全部, "__none__"=未分组, 组名=只看该组
+  let searchFilter = ""; // 搜索筛选: 匹配任务 ID/URL/备注
 
   /* 漏洞类型英文 → 中文（看板/详情展示；已是中文的原样透传） */
   const VULN_CN = {
@@ -110,6 +111,19 @@ XSModules.tasks = (() => {
       let jobs = data.jobs;
       if (groupFilter === "__none__") jobs = jobs.filter(j => !j.group);
       else if (groupFilter) jobs = jobs.filter(j => j.group === groupFilter);
+      if (searchFilter) {
+        const q = searchFilter.toLowerCase();
+        jobs = jobs.filter(j =>
+          (j.note || "").toLowerCase().includes(q) ||
+          (j.url || "").toLowerCase().includes(q) ||
+          (j.id || "").toLowerCase().includes(q));
+      }
+      const searchBar = `
+        <div style="margin-bottom:10px">
+          <input id="task-search" spellcheck="false" placeholder="搜索：备注 / URL / 任务ID…"
+            value="${XS.esc(searchFilter)}" autocomplete="off"
+            style="width:100%;padding:6px 10px;font-size:13px;border:1px solid var(--border,#333);border-radius:6px;background:var(--bg,#1a1a2e);color:var(--fg,#eee)">
+        </div>`;
       const grpBar = `
         <div class="grp-bar">
           <span class="grp-title">分组</span>
@@ -142,11 +156,22 @@ XSModules.tasks = (() => {
           ${statCard("发现数", s.findings, "")}
         </div>
         ${grpBar}
+        ${searchBar}
         <div class="cards">
           ${jobs.length ? jobs.map(j => cardHTML(j, groups, marks)).join("") :
-            `<div class="empty" style="grid-column:1/-1">${groupFilter ? "该分组暂无任务 — 点「全部」查看其它" : "暂无任务 — 点击右上角「新建任务」开始"}</div>`}
+            `<div class="empty" style="grid-column:1/-1">${searchFilter ? "无匹配任务" : groupFilter ? "该分组暂无任务 — 点「全部」查看其它" : "暂无任务 — 点击右上角「新建任务」开始"}</div>`}
         </div>`;
       bindList();
+      // 搜索框:实时过滤卡片(纯 DOM,不重新请求)
+      const searchEl = el.querySelector("#task-search");
+      if (searchEl) {
+        searchEl.addEventListener("input", () => {
+          const q = searchEl.value.trim().toLowerCase();
+          el.querySelectorAll(".card").forEach(card => {
+            card.style.display = (!q || card.textContent.toLowerCase().includes(q)) ? "" : "none";
+          });
+        });
+      }
     } catch (e) { XS.toast("列表刷新失败: " + e.message, "error"); }
   }
 
