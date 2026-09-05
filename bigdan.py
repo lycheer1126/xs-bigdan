@@ -243,6 +243,7 @@ PHASE_READ_INDEX = {
     "report": [  # 收尾: 评级/报告视角
         ("agents/report/SKILL.md", "报告视角:triage 6 项检查"),
         ("references/rating-standard.md", "SRC 评级标准(报告对齐)"),
+        ("references/src-rules/common.md", "跨平台公约:五家SRC共性(评级骨架/普遍不收清单/计数提交/测试纪律/时效)"),
         ("references/impact-escalation.md", "影响升级框架:影响写'能做什么'"),
     ],
 }
@@ -269,6 +270,15 @@ PLATFORM_RULES = [
     (("蚂蚁", "antsrc", "alipay", "antfin", "aliloan"), "references/src-rules/antsrc.md",
      "AntSRC: 金币=基础×应用系数(核心应用×10); 同域名同类型最多确认3个; 内网IP/域名泄露=无影响(SSRF需打出数据/凭证); "
      "nday须附CVE+可利用PoC且公开>半年或平台未知晓; 域名归属先查§5(koubei/mall.alipay归ASRC别报错家)"),
+    (("58同城", "58src", "58.com", "赶集", "安居客", "转转"), "references/src-rules/58.md",
+     "58SRC: 权重公式自动计算(回显SSRF=8分/无回显=3分); *.58.com≠58资产(外包合作最高中危按业务判定); "
+     "邮箱轰炸/手机号枚举/8位爆破不收; 同源漏洞只按75%"),
+    (("银联", "unionpay", "chinaums", "usrc", "云闪付"), "references/src-rules/unionpay.md",
+     "USRC: SSRF分级最清晰(有回显=高危/无回显=中危,严禁内网扫描); 同类型只收前3个; "
+     "高频扫描=终止全部权利(限速纪律最严档); 测试到POC为止严禁拖库/内网渗透"),
+    (("度小满", "dxm", "duxiaoman", "有钱花"), "references/src-rules/dxm.md",
+     "DXMSRC: 1积分=5元; 同源漏洞打包提交=1.1倍奖励; 短信横向轰炸不收; "
+     "webshell/反弹shell/内网扫描/拖库=0分+报案(内网纪律最严档); 独立威胁情报赛道(完整度五维)"),
 ]
 
 
