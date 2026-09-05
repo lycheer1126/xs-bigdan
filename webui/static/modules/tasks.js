@@ -13,7 +13,7 @@ XSModules.tasks = (() => {
   let logFile = "";
   let groupFilter = "";  // 看板分组筛选: ""=全部, "__none__"=未分组, 组名=只看该组
   let searchFilter = ""; // 搜索筛选: 匹配任务 ID/URL/备注
-  let searchDraft = "";  // 搜索框输入草稿: 未点搜索前不被提交, 5s 刷新不丢字
+  let searchDraft = "";  // 搜索框输入草稿: 未点搜索前不被提交, 10s 刷新不丢字
 
   /* 漏洞类型英文 → 中文（看板/详情展示；已是中文的原样透传） */
   const VULN_CN = {
@@ -146,7 +146,7 @@ XSModules.tasks = (() => {
       el.innerHTML = `
         <div class="page-head">
           <h1>任务</h1>
-          <span class="sub">runtime/jobs 实时状态 · 5s 自动刷新</span>
+          <span class="sub">runtime/jobs 实时状态 · 10s 自动刷新</span>
           <div class="head-actions">
             <button class="btn" id="btn-refresh">刷新</button>
             ${s.queued ? `<button class="btn" id="btn-clearq" title="取消所有排队中的任务（运行中的不受影响）">清空排队(${s.queued})</button>` : ""}
@@ -174,7 +174,7 @@ XSModules.tasks = (() => {
       // 搜索框:恢复输入值 + 实时过滤卡片(自动刷新不丢状态)
       const searchEl = el.querySelector("#task-search");
       if (searchEl) {
-        // 输入只存草稿（防 5s 自动刷新丢字），点按钮或回车才真正搜索
+        // 输入只存草稿（防 10s 自动刷新丢字），点按钮或回车才真正搜索
         searchEl.addEventListener("input", () => { searchDraft = searchEl.value; });
         const doSearch = () => {
           searchFilter = searchEl.value.trim().toLowerCase();
@@ -754,7 +754,7 @@ XSModules.tasks = (() => {
       });
     } else {
       renderList().catch(e => { el.innerHTML = `<div class="empty">加载失败: ${XS.esc(e.message)}</div>`; });
-      listTimer = setInterval(() => renderList().catch(() => {}), 5000);
+      listTimer = setInterval(() => renderList().catch(() => {}), 10000);
     }
   }
 
