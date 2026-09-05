@@ -100,9 +100,15 @@ def _evidence_files(job_dir: Path) -> List[Path]:
     return sorted(ev.glob("*.txt"))
 
 
+def _digest_order(p):
+    """digest 自然排序键:段号跨轮累积后 digest-10.md 需排在 digest-2 之后。"""
+    m = re.search(r"digest-(\d+)", p.name)
+    return int(m.group(1)) if m else 0
+
+
 def _digest_text(job_dir: Path, tail: int = 8000) -> str:
     """最新 digest 全文（前缀已在 bigdan.extract_digest 剥离），仅极端超大才截断。"""
-    digests = sorted(job_dir.glob("digest-*.md"))
+    digests = sorted(job_dir.glob("digest-*.md"), key=_digest_order)
     if not digests:
         return "（无）"
     text = digests[-1].read_text(encoding="utf-8", errors="replace").strip()
@@ -113,7 +119,7 @@ def _digest_text(job_dir: Path, tail: int = 8000) -> str:
 
 def _extract_digest_section(job_dir: Path, keyword: str, tail: int = 4000) -> str:
     """从 digest 提取某小节(如「疑似点」)文本；找不到返回空串。"""
-    digests = sorted(job_dir.glob("digest-*.md"))
+    digests = sorted(job_dir.glob("digest-*.md"), key=_digest_order)
     if not digests:
         return ""
     text = digests[-1].read_text(encoding="utf-8", errors="replace")
@@ -144,7 +150,7 @@ def _evidence_block(path: Path, limit: int = 50000) -> str:
 
 def _digest_full(job_dir: Path, limit: int = 20000) -> str:
     """最新 digest 全文（仅 >20KB 极端超大才截断）——报告附录用：Agent 原始交接即线索挖掘素材。"""
-    digests = sorted(job_dir.glob("digest-*.md"))
+    digests = sorted(job_dir.glob("digest-*.md"), key=_digest_order)
     if not digests:
         return ""
     text = digests[-1].read_text(encoding="utf-8", errors="replace").strip()

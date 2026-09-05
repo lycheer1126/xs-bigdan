@@ -963,9 +963,15 @@ def extract_digest(log_text: str) -> Optional[str]:
     return body.strip() or None
 
 
+def _digest_order(p: Path) -> int:
+    """digest 文件自然排序键:段号跨轮累积后会出现 digest-10.md,字符串排序会排到 digest-2 前。"""
+    m = re.search(r"digest-(\d+)", p.name)
+    return int(m.group(1)) if m else 0
+
+
 def load_digests(job_dir: Path) -> List[str]:
     digests: List[str] = []
-    for p in sorted(job_dir.glob("digest-*.md")):
+    for p in sorted(job_dir.glob("digest-*.md"), key=_digest_order):
         digests.append(p.read_text(encoding="utf-8", errors="replace"))
     return digests
 
@@ -1184,16 +1190,17 @@ def build_user_prompt(target: dict, seg_idx: int, segs: int, timeout_sec: int) -
 
 # ---------------------------------------------------------------- 单目标运行
 
-def _load_prev_findings(job_dir: Path) -> List[dict]:
-    """续打保护:读上一轮 summary.json 的 findings（报告只读 summary.json，不合并会丢历史发现）。"""
+def _load_prev_summary(job_dir: Path) -> dict:
+    """续跑衔接:读上一轮 summary.json。findings/segments/耗时在本次落盘时合并,
+    段号以此为偏移跨轮累积——否则 session-N.log / digest-N.md 会被第二轮段1覆盖。"""
     p = job_dir / "summary.json"
     if not p.is_file():
-        return []
+        return {}
     try:
         prev = json.loads(p.read_text(encoding="utf-8"))
-        return [f for f in (prev.get("findings") or []) if isinstance(f, dict)]
+        return prev if isinstance(prev, dict) else {}
     except (OSError, json.JSONDecodeError):
-        return []
+        return {}
 
 
 def run_target(
@@ -1211,29 +1218,39 @@ def run_target(
     (job_dir / "evidence").mkdir(parents=True, exist_ok=True)
     write_brief(job_dir, target, scope, segs, 0, creds=creds)
 
+    # 续跑合并:上一轮的段记录/起始时间/耗时全部继承,落盘时累加而非覆盖
+    prev_summary = _load_prev_summary(job_dir)
+    prev_segments = [s for s in (prev_summary.get("segments") or []) if isinstance(s, dict)]
+    seg_offset = len(prev_segments)  # 段号跨轮累积:防 session-N.log/digest-N.md 被第二轮段1覆盖
+    prev_planned = int(prev_summary.get("segments_planned") or 0)
+    prev_elapsed = float(prev_summary.get("elapsed_sec") or 0)
+
     summary = {
         "id": target["id"],
         "url": target["url"],
         "note": target["note"],
-        "segments": [],
-        "findings": _load_prev_findings(job_dir),
+        "segments": list(prev_segments),
+        "findings": [f for f in (prev_summary.get("findings") or []) if isinstance(f, dict)],
         "early_stop": False,
         "blocked": False,
         "timed_out": False,
         "job_timeout_sec": job_timeout_sec,
         "seg_timeout_sec": seg_timeout_sec,
-        "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "started_at": prev_summary.get("started_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
+    if seg_offset:
+        summary["resumed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     system_prompt = (PROMPTS_DIR / "system.md").read_text(encoding="utf-8")
     system_prompt += "\n\n## 方法论速查\n\n" + (PROMPTS_DIR / "methodology.md").read_text(encoding="utf-8")
 
     t0 = time.monotonic()
     segs_ran = 0
+    segs_total = seg_offset + segs  # 段号与计划数对模型/卡片展示均为跨轮累计口径
     for i in range(segs):
-        seg_no = i + 1
+        seg_no = seg_offset + i + 1
         # 每段重写 BRIEF:阶段由产物状态机推断（Safe-First 门控），段只是保鲜切片
-        phase, basis = write_brief(job_dir, target, scope, segs, i, creds=creds)
+        phase, basis = write_brief(job_dir, target, scope, segs_total, seg_no - 1, creds=creds)
         # 目标级总预算：预留 ~25s 收尾（迁移自 pi-recon 的 budget = timeout - 25）
         left = job_timeout_sec - (time.monotonic() - t0)
         if left < 45:
@@ -1243,7 +1260,7 @@ def run_target(
         if seg_to < 40:
             break
 
-        user_prompt = build_user_prompt(target, i, segs, seg_to)
+        user_prompt = build_user_prompt(target, seg_no - 1, segs_total, seg_to)
         log_path = job_dir / f"session-{seg_no}.log"
         tag = target["id"]
         seg_start_epoch = time.time()  # jsonl 兜底的陈旧镜像门槛基线
@@ -1395,9 +1412,9 @@ def run_target(
             break
 
     summary["ended_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    summary["elapsed_sec"] = round(time.monotonic() - t0, 1)
-    summary["segments_planned"] = segs
-    summary["segments_ran"] = segs_ran
+    summary["elapsed_sec"] = round(prev_elapsed + (time.monotonic() - t0), 1)
+    summary["segments_planned"] = prev_planned + segs
+    summary["segments_ran"] = seg_offset + segs_ran
     (job_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return summary
 
