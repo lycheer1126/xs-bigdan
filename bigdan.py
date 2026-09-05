@@ -227,18 +227,19 @@ PHASE_READ_INDEX = {
         ("skills/hunt_ssrf/SKILL.md", "SSRF 狩猎手册:URL类参数优先测(低成本高价值,OOB确认→云元数据表→绕过变体→盲打三连)"),
         ("skills/api_gateway_bypass/SKILL.md", "网关 403 特征(Kong/Nginx/AWSGW):路径规范化/方法覆盖/版本回退绕过"),
         ("references/403-bypass-complete.md", "访问屏障处理(mastermind Phase 4):遇 403/401 按序尝试 路径操纵→方法切换→Header注入→协议降级→组合;无屏障则 digest 写 SKIPPED"),
-        ("references/breakthrough-shortlist.md", "现场手法库:认证绕过/IDOR别停/对象存储矩阵/云IDE链/对话口工具执行(对得上特征才打,打一条记一条到 _linkage_results.jsonl——与端点覆盖账本联动,防手法被浏览不执行)"),
+        ("references/breakthrough-shortlist.md", "现场手法库:认证绕过/IDOR别停/导出越权/对象存储矩阵/云IDE链/对话口工具执行(对得上特征才打,打一条记一条到 _linkage_results.jsonl——与端点覆盖账本联动,防手法被浏览不执行)"),
     ],
-    "deep": [  # 🟡 条件阶段: JWT/加密/端点榨干（无 JWT 且无加密体→跳过并写 digest）
+    "deep": [  # 🟡 深水阶段: JWT/加密/端点榨干 + 垂直越权与admin面（联动有产出即进；无 JWT/加密材料时后半三节照常执行）
         ("skills/jwt_attack/SKILL.md", "发现 JWT 时:全攻击链(alg:none/弱密钥/kid/RS256→HS256)"),
         ("skills/crypto_attack/SKILL.md", "发现前端加密时:密钥提取→批量解密→明文回注值池"),
         ("references/discovery-amplification.md", "Discovery Amplification:端点→同类路径/参数榨干"),
         ("references/biz-mutations.md", "登录态业务参数扰动字典:七族扰动/命中即停(越权/状态机/载体探针)"),
+        ("references/admin-surface.md", "deep 后半常规:垂直越权打admin面/Swagger文档/Admin敏感路径(低WAF触发)"),
     ],
     "highrisk": [  # 🔴 条件阶段: mastermind 式价值确认(有 CONFIRMED 或 无 WAF)才进；WAF 存在全程 SAFE MODE
         ("agents/exploit/SKILL.md", "利用专家视角:FOUND≠CONFIRMED 三级分类"),
         ("references/src-rules/common.md", "跨平台公约:市场判断(预算三律)+定级锚点——确认哪个/放弃哪个按这里取舍"),
-        ("references/high-risk-probing.md", "高危探测细节(SQLi/CMD/SSTI/SSRF/XXE/越权)"),
+        ("references/high-risk-probing.md", "高危探测细节(SQLi/CMD/SSTI/SSRF/XXE——垂直越权/Swagger/admin面已移deep,导出越权已移linkage)"),
         ("references/impact-escalation.md", "影响升级框架:证明实际危害"),
         ("references/advanced-techniques.md", "冷门高命中:幽灵位/WAF厂商矩阵/反序列化指纹/类型混淆/EL注入/XOR藏钥/缓存欺骗/竞态H2单包"),
     ],

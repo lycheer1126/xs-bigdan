@@ -2,6 +2,11 @@
 
 > 从 SKILL.md Phase 3.8 迁出。进入 Phase 3.8 时加载。
 > WARNING: 这些操作会触发 WAF 规则。仅在 Phase 0-3 安全测试完成且确认目标价值后执行。
+>
+> **2026-09 重排**（低 WAF 触发项前移）:
+> - 垂直越权 / Swagger 文档 / Admin 敏感路径 → `admin-surface.md`（deep 阶段后半）
+> - 导出接口越权 → `breakthrough-shortlist.md` §二（linkage 阶段）
+> 本文件只保留**高 WAF 触发**的注入/对抗类。
 
 ---
 
@@ -16,36 +21,7 @@ Phase 3.8 执行模式（非"首次403=整体停止"）:
 
 ---
 
-## Step 1 — Swagger/API Docs（指纹为 Java/Spring Boot）
-
-SAFE MODE，1 次探测:
-
-```
-→ 只测 /api-docs（Swagger 统一入口，WAF 拦全拦不拦全不拦，3 次无意义）
-   200=提取全部端点 → 记录发现
-   403=记入 blocked: "/api-docs WAF blocked"
-   404=无 Swagger → 跳过
-```
-
----
-
-## Step 2 — Stack-Specific Admin 敏感路径（单请求, 3-5s 间隔）
-
-```
-每个 stack 只测 1 个代表性路径（WAF 对同类型路径行为一致，无需逐个探测）:
-  Java:   /actuator
-  PHP:    /.env
-  Python: /admin/
-  .NET:   /web.config
-
-→ 200/302=记录发现 → 继续
-→ 403=记入 blocked → 继续
-→ 404=跳过 → 继续
-```
-
----
-
-## Step 3 — SQL Injection（手工单点，不批量）
+## Step 1 — SQL Injection（手工单点，不批量）
 
 ```
 → 仅在 Phase 3 中已识别为 "可能的数据库输入" 的参数上测试
@@ -58,7 +34,7 @@ SAFE MODE，1 次探测:
 
 ---
 
-## Step 4 — Command Injection
+## Step 2 — Command Injection
 
 ```
 → 仅在名为 cmd/command/exec/shell/ping/host 的参数上测试
@@ -70,7 +46,7 @@ SAFE MODE，1 次探测:
 
 ---
 
-## Step 5 — SSTI / SSRF / XXE Payload Tests
+## Step 3 — SSTI / SSRF / XXE Payload Tests
 
 ```
 → SSTI: ${7*7}（预检，不触发 WAF）→ 计算=发现 | 原文=未发现
@@ -78,29 +54,6 @@ SAFE MODE，1 次探测:
         被拦截后换 collaborator OOB 回调
 → XXE: <!DOCTYPE> OOB → 回调=发现 | 被拦截=记入 blocked
 → 403=记入 blocked → 继续下一个测试
-```
-
----
-
-## Step 6 — §26 垂直越权探测（通常不触发 WAF）
-
-```
-→ 用已获得的 Token 逐条测试管理端点
-→ 按 §26 的优先级顺序: export/list → email/user → personnel/attendance → config
-→ 200=记录发现（垂直越权确认）
-→ 403=记录（有权限控制，正常）
-→ 此步骤不触发 WAF（正常业务请求格式），可全量测试
-```
-
----
-
-## Step 7 — 导出接口权限测试（通常不触发 WAF）
-
-```
-→ 对 Phase 1 标记的 export/download/excel/csv/report 接口测试权限
-→ 无Token直接访问=数据导出发现（严重）
-→ 普通Token访问管理导出=垂直越权发现（严重）
-→ 此步骤不触发 WAF（正常业务请求格式），可全量测试
 ```
 
 ---

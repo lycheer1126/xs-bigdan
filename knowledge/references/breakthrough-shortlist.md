@@ -22,6 +22,7 @@
 | 现象 | 别停，改打 |
 |---|---|
 | 详情 403 | 跟预览/导出/下载口 |
+| **export/download/excel/csv/report 类接口** | 无 Token 直访=未授权导出（严重）；普通 Token 打管理导出=垂直越权（严重）——正常业务请求格式不触发 WAF，可全量测 |
 | 列表有可见性参数 | `status=hidden`/`all`/`isDelete=1` 仍出全文 |
 | 筛选项 null 报错 | 改 `[]`（空数组=不过滤） |
 | pageNum=0 空 | 改 pageNum=1 |
