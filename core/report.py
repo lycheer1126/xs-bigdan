@@ -467,6 +467,25 @@ def _split_target_host(url_or_path: str) -> tuple:
     return "", url_or_path or "/"
 
 
+def _scope_expanded_hosts(job_dir: Path) -> dict:
+    """scope=root 模式下 agent 记录的扩展域清单 {host: 来源说明}（_scope_expanded.json）。"""
+    p = job_dir / "evidence" / "_scope_expanded.json"
+    if not p.is_file():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    out: dict = {}
+    recs = data if isinstance(data, list) else (data.get("hosts") if isinstance(data, dict) else None) or []
+    for rec in recs:
+        if isinstance(rec, dict) and str(rec.get("host") or "").strip():
+            out[str(rec["host"]).strip().lower()] = str(rec.get("source") or "")
+        elif isinstance(rec, str) and rec.strip():
+            out[rec.strip().lower()] = ""
+    return out
+
+
 def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "") -> List[str]:
     """单个漏洞详情——扁平四段，一段只说一件事、每项信息只出现一次：
 
@@ -503,6 +522,16 @@ def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "") -> List[str]
             lines.append(f"- `{u}`")
     else:
         lines.append("- 见下方复现数据包请求行")
+    expanded = _scope_expanded_hosts(job_dir)
+    if expanded and urls:
+        from urllib.parse import urlsplit
+        hosts_hit = sorted({urlsplit(u).netloc.lower().split(":")[0] for u in urls
+                            if urlsplit(u).netloc.lower().split(":")[0] in expanded})
+        if hosts_hit:
+            lines.append("")
+            lines.append(f"> ⚠️ 本条含 **scope 扩展域**（{', '.join(hosts_hit)}，来源: "
+                         f"{'; '.join(filter(None, (expanded.get(h, '') for h in hosts_hit))[:2]) or '见 _scope_expanded.json'}）"
+                         f"——提交前按平台收录范围人工核对归属（同根域≠一定在收录内，如 58 外包资产条款）。")
     lines.append("")
 
     # 二、危害说明（证据影响原文 / 按类型话术，绝不含"见证据文件"）

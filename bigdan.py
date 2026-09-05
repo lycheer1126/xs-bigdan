@@ -123,9 +123,11 @@ def resolve_llm_key() -> str:
 # ---------------------------------------------------------------- 目标解析
 
 def parse_targets(text: str) -> List[dict]:
-    """每行: [id|]url[|备注]  ；# 开头为注释；空行跳过。
+    """每行: [id|]url[|备注[|scope=strict|root]]  ；# 开头为注释；空行跳过。
 
     id 缺省时自动生成：取 URL host 的主域名部分。
+    scope: root=同根域被动引用扩展(默认)——JS/契约/流量引用的同根域子域视同白名单内；
+           strict=仅测显式 host,不扩展。
     """
     targets: List[dict] = []
     for raw in text.splitlines():
@@ -133,6 +135,11 @@ def parse_targets(text: str) -> List[dict]:
         if not line or line.startswith("#"):
             continue
         parts = [p.strip() for p in line.split("|")]
+        # 行尾 scope= 参数(必须是最后一个字段且严格匹配 scope=strict|root)
+        scope_mode = "root"
+        if parts and re.fullmatch(r"scope=(strict|root)", parts[-1], re.I):
+            scope_mode = parts[-1].split("=", 1)[1].lower()
+            parts = parts[:-1]
         # 无 id 的裸 URL 行(url 本身可能含 | 备注):parts[0] 以 http 开头即视为 URL 行
         if parts and parts[0].lower().startswith(("http://", "https://")):
             url = parts[0]
@@ -148,7 +155,7 @@ def parse_targets(text: str) -> List[dict]:
         if not tid:
             host = re.sub(r"^https?://", "", url).split("/")[0]
             tid = re.sub(r"[^0-9a-zA-Z.-]", "-", host)
-        targets.append({"id": tid, "url": url, "note": note})
+        targets.append({"id": tid, "url": url, "note": note, "scope": scope_mode})
     return targets
 
 
@@ -850,6 +857,25 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
             f"仅当该入口已榨干且有明确线索指向别处时才扩大，并在 digest 里说明理由。\n"
         )
 
+    # 分层作用域(scope=root 默认):L1 显式目标 + L2 同根域被动引用扩展可测,L3 跨根域禁测
+    scope_mode = (target.get("scope") or "root").lower()
+    if scope_mode == "root":
+        scope_section = (
+            f"\n## 授权范围（分层作用域，scope=root）\n"
+            f"- **L1 主目标（必测）**: {', '.join(scope)}\n"
+            f"- **L2 同根域·被动引用扩展（视同白名单内，可测）**: 主目标的 JS/契约/流量中引用的**同根域**子域"
+            f"（如 baseURL 指向的真实 API 网关）。每纳入一个 host，逐条记入 `evidence/_scope_expanded.json`"
+            f"（一行一条：{{\"host\": \"...\", \"source\": \"来源文件\", \"via\": \"引用方式\"}}）——"
+            f"发现必须带证据；禁止猜测、禁止子域爆破/字典扩面，只认主目标自己递过来的引用\n"
+            f"- **L3 跨根域（禁测）**: 页面引用的非同根域一律不测，只写进 digest 作线索"
+            f"（\"发现引用 xxx.com，建议人工确认归属后加入目标\"）\n"
+        )
+        scope_rule = ("只测 L1 主目标与 L2 同根域被动引用扩展的 host（扩展发现须记 _scope_expanded.json）；"
+                      "L3 跨根域禁止访问；禁止 DoS、禁止破坏性操作。")
+    else:
+        scope_section = f"- 本次授权范围（白名单，scope=strict）: {', '.join(scope)}\n"
+        scope_rule = "只测以上白名单内的 host（scope=strict，不做同根域扩展）；禁止 DoS、禁止破坏性操作。"
+
     brief.write_text(
         f"# 目标简报\n\n"
         f"- 目标 ID: `{target['id']}`\n"
@@ -859,7 +885,8 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
         f"- 总段数: {segs} | 本段: 第 {seg_idx + 1} 段（段=上下文保鲜切片，与阶段无关）\n"
         f"- 本段阶段判定: **{phase}**（harness 按落盘产物推断: {basis}；"
         f"你若依据 BRIEF/证据判断阶段不同，按你的判断推进并在 digest 里说明）\n"
-        f"{focus_section}\n"
+        f"{focus_section}"
+        f"{scope_section}\n"
         f"## 读取索引（本段建议读,按需 cat;别一次全读,防上下文泛滥）\n"
         f"{idx_lines}\n"
         f"\n"
@@ -893,7 +920,7 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
         f"{probe_extra}"
         f"\n"
         f"## 规则\n"
-        f"- 只测以上白名单内的 host；禁止 DoS、禁止破坏性操作。\n"
+        f"- {scope_rule}\n"
         f"- 发现漏洞 → 按 system prompt 的『证据落盘协议』写 evidence/ 并打印 FINDING 行。\n",
         encoding="utf-8",
     )
