@@ -64,8 +64,8 @@
 | recon → linkage | `_endpoint_params.json` 存在 + JS 分析完整度 ≥0.8 + 端点 ≥3（契约完整但端点 <3 → 小站豁免放行，纯静态小站不死锁在 recon） |
 | linkage 开工 | `_fingerprint.md` 存在（WAF 状态已确认） |
 | linkage 有产出 | `_linkage_results.jsonl` ≥1 条 |
-| → deep | 无 JWT 且无加密体 → 跳过 |
-| → highrisk | 已有 ≥1 CONFIRMED；有 WAF 则全程 SAFE MODE |
+| → deep | 联动账本 ≥1 条——转深水层（JWT/加密/端点榨干/admin 面），结果记入 `_deep_results.jsonl` |
+| → highrisk | deep 账本 ≥1 条（普通层收尽即进，CONFIRMED/WAF 不再是门）；有 WAF 全程 SAFE MODE |
 | → report | 攻击面收尽 或 digest 标注「建议结束」 |
 
 为什么这么设计：LLM 会自报"我做完了"（实际没做完）、会谎报进度。唯一可信的是文件在不在磁盘上、内容过不过检查——**信任锚点是文件系统，不是模型的嘴**。

@@ -379,6 +379,26 @@ def _linkage_consumed(job_dir: Path) -> int:
 _LOGIN_SURFACE_RE = re.compile(r"login|signin|register|signup|reset|verify|sms|captcha|passwd|password", re.I)
 
 
+def _deep_consumed(job_dir: Path) -> int:
+    """有效 deep 消费计数:item 非空 + result 字段存在的记录行数(账本=evidence/_deep_results.jsonl)。
+
+    校验模式与 _linkage_consumed 同款:纯存在性可被空壳记录骗过,要求结构完整——
+    纯叙述/空壳不算消费。skip 合法(无JWT/无加密体/admin面blocked),如实写即算。
+    """
+    p = job_dir / "evidence" / "_deep_results.jsonl"
+    if not p.is_file():
+        return 0
+    n = 0
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("result") is not None and str(rec.get("item") or "").strip():
+            n += 1
+    return n
+
+
 def _has_login_surface(job_dir: Path) -> bool:
     """登录口存在判定:契约文件端点的路径含登录/注册/找回/验证码类关键词。"""
     ep = job_dir / "evidence" / "_endpoint_params.json"
@@ -463,6 +483,9 @@ def _early_stop_gate(job_dir: Path) -> tuple[bool, str]:
         return False, "指纹未落盘(_fingerprint.md 缺失——WAF 状态未确认,普通测试层不完整)"
     if _linkage_consumed(job_dir) < 1:
         return False, "联动消费=0(值池联动/参数测试未产出任何结果,参数面疑似未测)"
+    if _deep_consumed(job_dir) < 1:
+        return False, ("deep 消费=0(深水层 JWT/加密/扰动/admin面 未记账,evidence/_deep_results.jsonl "
+                       "无记录——deep 层未走完不收工;无 JWT/加密体也须写 skipped 行)")
     covered, total, uncovered = _endpoint_coverage(job_dir)
     if uncovered:
         sample = "、".join(uncovered[:5]) + ("…" if len(uncovered) > 5 else "")
@@ -602,31 +625,33 @@ def infer_phase(job_dir: Path) -> tuple[str, str]:
                     return "report", "最新 digest 标注建议结束"
             except OSError:
                 pass
-    # highrisk（mastermind 式价值确认）: recon 门过 + 指纹落盘 + 联动已开工 + (CONFIRMED≥1 或 无 WAF)。
+    # highrisk（覆盖确认,2026-09 重排）: recon 门过 + 指纹落盘 + 联动已开工 + deep 层已记账。
+    # CONFIRMED 与 WAF 不再是门条件——账本齐 = 普通面已收尽,最后上重炮;即使触发 WAF 也无碍
+    # （安静面已测完,同"短信轰炸放最后测"一个道理）。有 WAF 进高危后仍全程 SAFE MODE 限速。
     gate_ok, gate_why = _recon_gate(job_dir)
     confirmed = _confirmed_count(job_dir)
     fp_ok = _fingerprint_ok(job_dir)
-    if gate_ok and fp_ok and _linkage_consumed(job_dir) > 0 and (confirmed >= 1 or not _waf_detected(job_dir)):
-        if confirmed >= 1:
-            return "highrisk", f"已有 {confirmed} 条 CONFIRMED，{gate_why}"
-        return "highrisk", f"零 CONFIRMED 但普通层完整且无 WAF(价值确认:可测性高)，{gate_why}"
-    if confirmed >= 1:
-        return "recon", f"已有发现但 {gate_why}，先补门"
-    # deep / linkage / recon: 由 recon 门 + 指纹落盘 + 联动消费进度放行
-    if not gate_ok:
-        return "recon", gate_why
-    if not fp_ok:
-        return "recon", "指纹未落盘(_fingerprint.md 缺失——WAF 状态未确认，Safe-First 不许进普通测试)，先补 recon"
     consumed = _linkage_consumed(job_dir)
-    if consumed > 0:
-        return "deep", f"联动已消费 {consumed} 条配对且暂无 CONFIRMED，转入 JWT/加密/端点榨干"
-    return "linkage", f"{gate_why}，值池联动尚未消费"
+    deep_done = _deep_consumed(job_dir)
+    if gate_ok and fp_ok and consumed > 0 and deep_done > 0:
+        mode = "，SAFE MODE 限速" if _waf_detected(job_dir) else ""
+        return "highrisk", f"联动 {consumed} + deep {deep_done} 账本齐(普通层收尽)进价值重炮层{mode}，{gate_why}"
+    found = f"已有 {confirmed} 条 CONFIRMED，" if confirmed else ""
+    if not gate_ok:
+        return "recon", (f"{found}但 recon 门未过({gate_why})，先补门" if confirmed else gate_why)
+    if not fp_ok:
+        return "recon", (f"{found}但指纹未落盘(_fingerprint.md 缺失——WAF 状态未确认，Safe-First 不许进普通测试)，先补 recon")
+    if consumed == 0:
+        return "linkage", (f"{found}先走值池联动(账本空)" if confirmed else f"{gate_why}，值池联动尚未消费")
+    return "deep", (f"联动已消费 {consumed} 条配对，转深水层(JWT/加密/扰动/admin面)"
+                    f"——结果记账 _deep_results.jsonl 后进高危")
 
 
-# 指纹文件质量抽查关键词:空壳文件(如仅"ok"/乱写)不许过门
+# 指纹文件质量抽查关键词:空壳文件(如仅"ok"/乱写)不许过门;
+# "未识别/unknown"类也是有效指纹产物(声称测过但无法识别),不应卡死 recon 门
 _FINGERPRINT_HINT_RE = re.compile(
     r"WAF|waf|技术栈|技术|栈|Server|框架|Tengine|nginx|Nginx|Apache|IIS|Java|PHP|Python|Node|Vue|React|"
-    r"CDN|Cloudflare|指纹|响应头|Cookie|JSESSIONID|PHPSESSID|ASP\.NET", re.I)
+    r"CDN|Cloudflare|指纹|响应头|Cookie|JSESSIONID|PHPSESSID|ASP\.NET|未识别|无法确定|无特征|unknown", re.I)
 
 
 def _fingerprint_ok(job_dir: Path) -> bool:
@@ -719,6 +744,20 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
 
     # 联动配对（值池引擎注入:契约文件存在时才显示）
     linkage_section = build_linkage_section(job_dir)
+
+    # deep 阶段记账义务:highrisk 门以 _deep_results.jsonl 为票——不记账=深水层没走完
+    deep_ledger_section = ""
+    if phase == "deep":
+        deep_ledger_section = (
+            "\n## deep 阶段记账义务（进高危层的门票，账本空 = 深水层未走完）\n"
+            "本段深水动作**逐条**记入 `evidence/_deep_results.jsonl`，一行一条 JSON：\n"
+            '```json\n{"item": "jwt|crypto|swagger_docs|admin_paths|vertical_privesc|biz_mutations|amplification",'
+            ' "target": "对象(端点/参数/文件)", "result": "hit|miss|blocked|skipped", "note": "一句话"}\n```\n'
+            "- skip 合法：目标无 JWT / 无加密体 / 无账号打不了 admin 面 → result 填 \"skipped\" 如实写，一行即算消费\n"
+            "- item 取值：jwt(JWT攻击) / crypto(前端加密) / swagger_docs(接口文档) / admin_paths(敏感路径) / "
+            "vertical_privesc(垂直越权) / biz_mutations(业务扰动) / amplification(端点榨干)\n"
+            "- 与联动账本 _linkage_results.jsonl 并存，各记各的不要混写；早停门和高危门都会查这本账\n"
+        )
 
     # 用户线索（人工协作通道:webui 提供线索 → user_input.md → 续跑时注入 BRIEF）
     user_input_section = ""
@@ -825,6 +864,7 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
         f"{idx_lines}\n"
         f"\n"
         f"{linkage_section}"
+        f"{deep_ledger_section}"
         f"{user_input_section}"
         f"{platform_section}"
         f"{intent_section}"

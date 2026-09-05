@@ -1,7 +1,9 @@
 # 高危探测详细步骤 (Phase 3.8)
 
 > 从 SKILL.md Phase 3.8 迁出。进入 Phase 3.8 时加载。
-> WARNING: 这些操作会触发 WAF 规则。仅在 Phase 0-3 安全测试完成且确认目标价值后执行。
+> **进入前置（2026-09 重排）**：deep 账本 `evidence/_deep_results.jsonl` 已立（深水层已走完）——
+> 本阶段是收尾重炮，前面的安静面（联动/深水/越权/admin 面）测完才轮到这里。
+> WARNING: 这些操作会触发 WAF 规则。有 WAF 全程 SAFE MODE 限速；最后才打，触发也无碍。
 >
 > **2026-09 重排**（低 WAF 触发项前移）:
 > - 垂直越权 / Swagger 文档 / Admin 敏感路径 → `admin-surface.md`（deep 阶段后半）

@@ -52,4 +52,5 @@ SAFE MODE，1 次探测:
 ## 执行时机
 
 deep 阶段后半：JWT/加密材料不存在或榨干后，本文件三节是 deep 的常规收尾动作。
-测完写 runlog 记账（含 blocked 清单），与端点覆盖账本联动。
+**三节结果（含 blocked/skipped）逐条记账到 `evidence/_deep_results.jsonl`**（格式见 BRIEF deep 记账义务节）——
+这本账是进 highrisk 的门票，也是早停门的检查项；账本空 = 深水层未走完。
