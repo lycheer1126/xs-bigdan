@@ -239,7 +239,7 @@ PHASE_READ_INDEX = {
     "highrisk": [  # 🔴 条件阶段: mastermind 式价值确认(有 CONFIRMED 或 无 WAF)才进；WAF 存在全程 SAFE MODE
         ("agents/exploit/SKILL.md", "利用专家视角:FOUND≠CONFIRMED 三级分类"),
         ("references/src-rules/common.md", "跨平台公约:市场判断(预算三律)+定级锚点——确认哪个/放弃哪个按这里取舍"),
-        ("references/high-risk-probing.md", "高危探测细节(SQLi/CMD/SSTI/SSRF/XXE——垂直越权/Swagger/admin面已移deep,导出越权已移linkage)"),
+        ("references/high-risk-probing.md", "高危探测细节(SQLi/CMD/SSTI/XXE——SSRF主测在linkage(hunt_ssrf)/垂直越权与admin面在deep/导出越权在linkage)"),
         ("references/impact-escalation.md", "影响升级框架:证明实际危害"),
         ("references/advanced-techniques.md", "冷门高命中:幽灵位/WAF厂商矩阵/反序列化指纹/类型混淆/EL注入/XOR藏钥/缓存欺骗/竞态H2单包"),
     ],

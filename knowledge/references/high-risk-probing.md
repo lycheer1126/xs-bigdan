@@ -46,15 +46,17 @@ Phase 3.8 执行模式（非"首次403=整体停止"）:
 
 ---
 
-## Step 3 — SSTI / SSRF / XXE Payload Tests
+## Step 3 — SSTI / XXE Payload Tests
 
 ```
 → SSTI: ${7*7}（预检，不触发 WAF）→ 计算=发现 | 原文=未发现
-→ SSRF: http://127.0.0.1:80 → 被拦截=记入 blocked | 返回数据=发现
-        被拦截后换 collaborator OOB 回调
 → XXE: <!DOCTYPE> OOB → 回调=发现 | 被拦截=记入 blocked
 → 403=记入 blocked → 继续下一个测试
 ```
+
+> SSRF 不在本阶段：主测收敛至 `hunt_ssrf/SKILL.md`（🟡 linkage，URL 参数优先 +
+> OOB 确认 + 云元数据 + 绕过变体 + 盲打三连），此处不再重复探测。
+> 垂直越权/admin 面 → `admin-surface.md`（deep）；导出越权 → `breakthrough-shortlist.md`（linkage）。
 
 ---
 
