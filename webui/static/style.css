@@ -346,3 +346,49 @@ pre.code.dim { color: var(--txt-dim); }
 .mark-vuln:hover { border-color: var(--accent-2); color: var(--accent-2); }
 .mark-vuln.on { color: #065f46; border-color: rgba(15, 157, 110, .6);
   background: rgba(209, 250, 229, .7); font-weight: 600; }
+
+/* ============ 侧栏标语（点一下换一句） ============ */
+.slogan {
+  padding: 10px 12px; margin: 0 12px; text-align: center;
+  font-size: 11.5px; color: var(--txt-faint); letter-spacing: .5px;
+  cursor: pointer; user-select: none; transition: color .15s;
+}
+.slogan:hover { color: var(--accent); }
+
+/* ============ 主题: 青花白（陶瓷白暖釉底 × 青花蓝 × 朱砂印） ============
+   只换气质不换骨架：全部经变量与少量组件覆写实现，功能零改动 */
+html[data-theme="porcelain"] {
+  --bg: #f6f4ee;          /* 素坯暖白 */
+  --bg-2: #fdfcf8;        /* 釉面 */
+  --bg-3: #efece3;
+  --bg-4: #e5e0d2;
+  --line: #e3ddd0;        /* 暖调发丝线 */
+  --txt: #2d2a24;         /* 墨色 */
+  --txt-dim: #6d675a;
+  --txt-faint: #a49b89;
+  --accent: #2b5c8a;      /* 青花蓝 */
+  --accent-2: #3d8b6e;    /* 青瓷绿 */
+  --warn: #b0700f;
+  --danger: #b3413c;      /* 朱砂 */
+  --info: #4a6fa5;
+  --hit: #1f2937;
+}
+html[data-theme="porcelain"] body { background: linear-gradient(160deg, #f8f6f0 0%, #f2efe7 100%); }
+html[data-theme="porcelain"] .sidebar { background: linear-gradient(180deg, #fdfcf8, #f8f5ee); }
+/* 印章 logo：朱砂方印 */
+html[data-theme="porcelain"] .logo-mark {
+  background: #b3413c; border-radius: 7px;
+  box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.5), 0 2px 6px rgba(179,65,60,.25);
+}
+html[data-theme="porcelain"] .btn.primary { background: linear-gradient(135deg, #2b5c8a, #4a7fae); }
+html[data-theme="porcelain"] .nav-item.active { border-color: rgba(43,92,138,.35); }
+html[data-theme="porcelain"] .badge.running { border-color: rgba(43,92,138,.45); background: rgba(43,92,138,.10); }
+html[data-theme="porcelain"] .badge.done { border-color: rgba(61,139,110,.45); background: rgba(61,139,110,.10); }
+html[data-theme="porcelain"] .chip-grp { color: #3b5990; background: #e9eef6; border-color: #bccbe2; }
+html[data-theme="porcelain"] .log-box,
+html[data-theme="porcelain"] pre.code { background: #fbfaf5; }
+html[data-theme="porcelain"] .mark-vuln.on { color: #2f6650; border-color: rgba(61,139,110,.6); background: rgba(216,240,228,.7); }
+html[data-theme="porcelain"] ::-webkit-scrollbar-thumb:hover { background: #d3cab7; }
+/* 标语在青花白主题下衬一枚小瓷青点缀 */
+html[data-theme="porcelain"] .slogan { color: #8a8272; border-top: 1px dashed var(--line); margin-bottom: 8px; }
+html[data-theme="porcelain"] .slogan:hover { color: var(--accent); }

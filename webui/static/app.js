@@ -196,6 +196,34 @@ const XS = (() => {
     }
   }
 
+  // ---- 主题: 经典白 / 青花白（localStorage 记忆） ----
+  const THEME_KEY = "xb_theme";
+  function applyTheme(t, quiet) {
+    const porcelain = t === "porcelain";
+    document.documentElement.dataset.theme = porcelain ? "porcelain" : "";
+    try { localStorage.setItem(THEME_KEY, t); } catch {}
+    const btn = document.getElementById("theme-toggle");
+    if (btn) btn.textContent = porcelain ? "◦ 经典白" : "◈ 青花白";
+    if (!quiet) toast(porcelain ? "已换上 · 青花白" : "已换回 · 经典白", "ok");
+  }
+
+  // ---- 侧栏标语：每次进页面随机一句，点击可换 ----
+  const SLOGANS = [
+    "细水长流 · 大胆尝试",
+    "慢打深挖 · 证据先行",
+    "信任落盘 · 不信口述",
+    "黑盒之下 · 步步为营",
+    "洞不在多 · 在于能交",
+    "先安全 · 后深入",
+    "一段一世界 · 步步皆落盘",
+    "预算烧在刃上",
+  ];
+  function rotateSlogan() {
+    const el = document.getElementById("slogan");
+    if (!el) return;
+    el.textContent = `「 ${SLOGANS[Math.floor(Math.random() * SLOGANS.length)]} 」`;
+  }
+
   async function boot() {
     try {
       const h = await api("/api/health");
@@ -206,6 +234,13 @@ const XS = (() => {
     const data = await api("/api/modules");
     state.modules = data.modules;
     document.getElementById("foot-ver").textContent = "v" + data.version;
+    let saved = "classic";
+    try { saved = localStorage.getItem(THEME_KEY) || "classic"; } catch {}
+    applyTheme(saved, true);
+    document.getElementById("theme-toggle").addEventListener("click",
+      () => applyTheme(document.documentElement.dataset.theme === "porcelain" ? "classic" : "porcelain"));
+    rotateSlogan();
+    document.getElementById("slogan").addEventListener("click", rotateSlogan);
     await renderNav();
     window.addEventListener("hashchange", route);
     route();
