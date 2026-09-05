@@ -130,7 +130,7 @@
   原则(mastermind Iron Rule 1 — Fingerprint First, Test What Matches):
   - **栈匹配选型**:Java→反序列化/SpEL/Actuator, PHP→SSTI/文件包含/.env, Python→SSTI/任意文件读,
     Node→原型污染/SSRF, .NET→ViewState/反序列化, Struts2→OGNL(S2-045 等,见 cve-chains)
-  - **参数语义选型**:数字参数→SQLi/整数边界, URL 参数→SSRF/开放重定向, 文本参数→XSS/SSTI,
+  - **参数语义选型**:数字参数→SQLi/整数边界, URL 参数→SSRF/开放重定向(批量测: xsredir.py), 文本参数→XSS/SSTI,
     文件参数→上传/路径穿越, XML 提交→XXE——payload 形态随参数语义构造,示例:`id=3-1`/`${7*7}` 仅示意
   - **盲打类一律 dnslog OOB 确认**(dnslog.cn 最快,curl 无头三步可用:主页拿cookie→getdomain.php 得子域→
     getrecords.php 查记录;被封/不稳 → interactsh-client(需 tools/bin 有) → 自有域名/自建;

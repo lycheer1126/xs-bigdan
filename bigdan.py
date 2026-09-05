@@ -589,6 +589,7 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
     browser = (tools_dir / "bin" / "browser_probe.py").as_posix()
     wordlist_paths = (tools_dir / "wordlists" / "paths.txt").as_posix()
     wordlist_params = (tools_dir / "wordlists" / "params.txt").as_posix()
+    redir = (tools_dir / "bin" / "xsredir.py").as_posix()
     ffuf_bin = next(iter(sorted((tools_dir / "bin").glob("ffuf*"))), tools_dir / "bin" / "ffuf")
 
     # 动态探测本机工具并注入（pi-recon"工具决定可见性"；失败不影响 BRIEF）
@@ -740,6 +741,7 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
         f"## 工具（绝对路径，直接 `python <路径> ...` 调用，不要 which/find 找）\n"
         f"- 请求: `python {req} <url> [--method POST] [--data '...'] [--json '{{...}}'] [--header 'K: V'] [--save 文件名]`\n"
         f"- 枚举: `python {enum} <base-url> [--wordlist 文件] [--limit N]`\n"
+        f"- 开放重定向: `python {redir} <url模板:参数值用 FUZZ 占位|基础URL+--params a,b> [--oob 你的dnslog域]` —— 参数×重定向payload矩阵,Location 含标记=实锤,同域跳转自动标误报\n"
         f"- 浏览器分析(SPA必用): `python {browser} open|js|chunks|login|snow <url> ...` —— 渲染后DOM/console/XHR/执行JS/mock登录/雪瞳26类提取;高难站先走JS驱动(见读取索引)\n"
         f"- 路径字典: `{wordlist_paths}`(轻探档103条,xsenum默认)\n"
         f"- 参数字典: `{wordlist_params}`\n"
