@@ -11,6 +11,26 @@ XSModules.config = (() => {
   const llmCur = () => llmState.profiles.find(p => p.name === llmState.cur) || llmState.profiles[0];
   const THINKING = ["low", "medium", "high"];
 
+  // 折叠面板初始态:本地记忆优先;无记忆时行数>8 默认收起(长列表不撑页面)
+  function foldClass(id, rows) {
+    let v = null;
+    try { v = localStorage.getItem("xb_fold_" + id); } catch {}
+    if (v === "1") return "collapsed";
+    if (v === "0") return "";
+    return rows > 8 ? "collapsed" : "";
+  }
+
+  function bindFoldToggles() {
+    el.querySelectorAll(".panel-head.toggle").forEach(head => {
+      head.addEventListener("click", () => {
+        const panel = head.closest(".panel");
+        panel.classList.toggle("collapsed");
+        try { localStorage.setItem("xb_fold_" + panel.dataset.fold,
+          panel.classList.contains("collapsed") ? "1" : "0"); } catch {}
+      });
+    });
+  }
+
   function llmPanelHtml() {
     const chips = llmState.profiles.map(p => {
       const isAct = p.name === llmState.active;
@@ -162,17 +182,17 @@ XSModules.config = (() => {
           <button class="btn primary" id="cfg-cred-save">保存账号池</button>
         </div>
       </div>
-      <div class="panel">
-        <div class="panel-head">环境变量（.env + 进程环境）</div>
+      <div class="panel ${foldClass("env", Object.entries(cfg.env).length || (cfg.dotenv_keys || []).length)}" data-fold="env">
+        <div class="panel-head toggle"><span class="fold-ico">▾</span>环境变量（${Object.entries(cfg.env).length || (cfg.dotenv_keys || []).length}）</div>
         <div class="panel-body"><table class="kv">${envRows || "<tr><td>（无）</td></tr>"}</table></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-        <div class="panel">
-          <div class="panel-head">工具链 tools/bin（${cfg.tools.length}）</div>
+        <div class="panel ${foldClass("tools", cfg.tools.length)}" data-fold="tools">
+          <div class="panel-head toggle"><span class="fold-ico">▾</span>工具链 tools/bin（${cfg.tools.length}）</div>
           <div class="panel-body"><table class="kv">${toolRows || "<tr><td>（空）</td></tr>"}</table></div>
         </div>
-        <div class="panel">
-          <div class="panel-head">字典 tools/wordlists</div>
+        <div class="panel ${foldClass("wordlists", Object.keys(cfg.wordlists).length)}" data-fold="wordlists">
+          <div class="panel-head toggle"><span class="fold-ico">▾</span>字典 tools/wordlists（${Object.keys(cfg.wordlists).length}）</div>
           <div class="panel-body"><table class="kv">${wlRows || "<tr><td>（空）</td></tr>"}</table></div>
         </div>
       </div>
@@ -186,6 +206,7 @@ XSModules.config = (() => {
         </table></div>
       </div>`;
     bindLlmEvents();
+    bindFoldToggles();
     el.querySelector("#cfg-save").addEventListener("click", async () => {
       try {
         await XS.api("/api/config/targets", { method: "PUT", json: { text: el.querySelector("#cfg-targets").value } });

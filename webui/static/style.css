@@ -175,6 +175,12 @@ body {
 }
 .panel-head .spacer { flex: 1; }
 .panel-body { padding: 12px 14px; }
+/* 可折叠面板:点击面板头切换,状态记忆在 localStorage */
+.panel-head.toggle { cursor: pointer; user-select: none; }
+.panel-head.toggle:hover { color: var(--accent); }
+.panel-head .fold-ico { display: inline-block; width: 15px; color: var(--txt-faint); font-size: 11px; transition: transform .15s; }
+.panel.collapsed .fold-ico { transform: rotate(-90deg); }
+.panel.collapsed .panel-body { display: none; }
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); padding: 0 10px; background: var(--bg-2); }
 .tab {
   padding: 9px 14px; font-size: 13px; color: var(--txt-dim);
