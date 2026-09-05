@@ -45,17 +45,22 @@ body {
   box-shadow: 0 2px 8px rgba(14,165,196,.30);
 }
 .logo-mark svg { display: block; }
-/* 印文:衬线体 X/S 对角排布,配内圈阴刻边框,如一方小印 */
+/* 印文: X/S 对角紧凑相抵,X 左倾 S 右倾,如双子角力 */
 .seal-glyph {
   fill: #ffffff;
-  font: 700 13px Georgia, "Times New Roman", serif;
+  font: 700 13.5px Georgia, "Times New Roman", serif;
   text-anchor: middle;
 }
+/* 字标:不依赖特定字体,纯排版手法——斜体强调 xs + 紧排主体,整体微倾,悬停回正(灵动) */
 .logo-text b {
-  display: block;
-  font: italic 700 18px "Playfair Display", Georgia, "Times New Roman", serif;
-  letter-spacing: .4px;
+  display: inline-block;
+  font: 800 17.5px/1.15 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  letter-spacing: -0.2px;
+  transform: rotate(-1.5deg);
+  transition: transform .25s;
 }
+.logo-text b .lw { color: var(--accent); font-style: italic; padding-right: 1px; }
+.logo:hover .logo-text b { transform: rotate(0deg); }
 .logo-text span { font-size: 10.5px; color: var(--txt-faint); font-variant: small-caps; letter-spacing: 2.5px; }
 .nav { flex: 1; padding: 12px 10px; overflow-y: auto; }
 .nav-item {
