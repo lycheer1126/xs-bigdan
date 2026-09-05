@@ -98,6 +98,14 @@ XSModules.tasks = (() => {
       </div>`;
   }
 
+  function applySearchFilter() {
+    if (!el) return;
+    const q = searchFilter.toLowerCase();
+    el.querySelectorAll(".card").forEach(card => {
+      card.style.display = (!q || card.textContent.toLowerCase().includes(q)) ? "" : "none";
+    });
+  }
+
   async function renderList() {
     if (!el || detailId) return;
     try {
@@ -162,15 +170,15 @@ XSModules.tasks = (() => {
             `<div class="empty" style="grid-column:1/-1">${searchFilter ? "无匹配任务" : groupFilter ? "该分组暂无任务 — 点「全部」查看其它" : "暂无任务 — 点击右上角「新建任务」开始"}</div>`}
         </div>`;
       bindList();
-      // 搜索框:实时过滤卡片(纯 DOM,不重新请求)
+      // 搜索框:恢复输入值 + 实时过滤卡片(自动刷新不丢状态)
       const searchEl = el.querySelector("#task-search");
       if (searchEl) {
+        searchEl.value = searchFilter;
         searchEl.addEventListener("input", () => {
-          const q = searchEl.value.trim().toLowerCase();
-          el.querySelectorAll(".card").forEach(card => {
-            card.style.display = (!q || card.textContent.toLowerCase().includes(q)) ? "" : "none";
-          });
+          searchFilter = searchEl.value.trim().toLowerCase();
+          applySearchFilter();
         });
+        applySearchFilter();
       }
     } catch (e) { XS.toast("列表刷新失败: " + e.message, "error"); }
   }
@@ -186,8 +194,9 @@ XSModules.tasks = (() => {
       } catch (e) { XS.toast("报告读取/生成失败: " + e.message, "error"); return; }
     }
     const mask = XS.modal(`
+      <div class="modal wide">
       <div class="modal-head">${XS.esc(r.name)} <span class="x">✕</span></div>
-      <div class="modal-body" style="max-height:72vh;overflow:auto"><div class="md-body">${XS.md(r.content)}</div></div>
+      <div class="modal-body" style="max-height:80vh;overflow:auto"><div class="md-body">${XS.md(r.content)}</div></div>
       <div class="modal-foot">
         <button class="btn" id="md-copy">复制原文</button>
         <button class="btn" id="md-close">关闭</button>
