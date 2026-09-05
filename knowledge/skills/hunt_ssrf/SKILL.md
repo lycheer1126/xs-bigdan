@@ -75,7 +75,7 @@ link preview_url avatar_url userAvatar webhook_url image_url cover_url return_ur
 
 ## 2. OOB 回调源选择（三大来源，按目标所属 SRC 优先用官方靶标）
 
-### 2a. 各大 SRC 官方内网靶标（**首选**——靶标本身即授权证明，报告直接采信）
+### 2a. 各大 SRC 官方内网靶标（**首选**——小红书靶标见平台规则 xhs.md 同源）——靶标本身即授权证明，报告直接采信）
 
 > 靶标分两类：**有回显**（响应/页面直接出现 flag=SSRF 实锤）与**无回显**（靶标记录访问日志，
 > 报告中写明测试时间+自定义字段由 SRC 后台核验）。目标属于哪家 SRC 就用哪家的靶标，
@@ -92,6 +92,7 @@ link preview_url avatar_url userAvatar webhook_url image_url cover_url return_ur
 | 讯飞 | `http://ssrf.security.private/` 或 `http://diting.xfyun.cn` | — | |
 | 小米 | `https://ssrf.dun.mi.com/ssrf/hacker` | 同左（`hacker` 字段自定义用于区分；无回显时报告写自定义字段+访问时间） | |
 | 看云 | `http://10.13.50.28:5555/flag.html` | `http://10.13.50.28:5555/ssrf_forward?host=yourdnslog.domain` | host 直接填域名不带协议 |
+| 小红书 | `http://10.11.23.35:5555/flag.html` | `http://10.11.23.35:5555/ssrf_forward?host=yourdnslog.domain`（host 直接填域名不带协议） | 官方规则明文:完整回显=高危/无完整回显=中危/无回显bind=低危 |
 
 **用法纪律**：目标属于表内 SRC → 靶标 URL 直接当参数值打，有回显截图、无回显记录时间；
 目标不在表内 → 用 §2b/§2c 通用通道。靶标只用于"证明 SSRF 存在"，不用于升级利用。

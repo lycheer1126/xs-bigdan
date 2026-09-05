@@ -8,14 +8,13 @@
 
 | 平台 | 文件 | 关键差异 |
 |---|---|---|
-| AntSRC（蚂蚁） | [antsrc.md](antsrc.md) | 金币=基础×应用系数；同域名同类型≤3；内网IP泄露=无影响；nday 时效规则；koubei 归 ASRC |
+| AntSRC（蚂蚁） | [antsrc.md](antsrc.md) | 金币=基础×应用系数; 同域名同类型≤3; koubei 归 ASRC |
+| 小红书（XHSSRC） | [xhs.md](xhs.md) | 四类报告分轨; 奖励=等级×子级W×业务价值B; SSRF 官方靶标 10.11.23.35:5555; 风控异常线索赛道 | 金币=基础×应用系数；同域名同类型≤3；内网IP泄露=无影响；nday 时效规则；koubei 归 ASRC |
 
-## 待收录（规则链接已存，文本到手后按 antsrc.md 模板整理）
+## 待收录（滴滴——SPA 页面 curl 拿不到正文，需浏览器打开复制文本后按模板整理）
 
-- 58 安全：https://security.58.com/notice/detail/48
-- 银联安全：https://security.unionpay.com/notice/detail?id=972 （台账已有银联实战案例：业务逻辑三合一/注册接口忽略密码）
-- DXMSRC 外部漏洞处理规则 V3.0：bcebos PDF（链接见会话记录）
 - 滴滴出行安全：https://sec.didichuxing.com/notice/detail?id=757
+  （侦察记录：页面为 Vue SPA 壳，正文走 API 异步加载；已尝试 app.js 提取未见公告接口）
 
 ## 收录模板（新平台照此结构写）
 
