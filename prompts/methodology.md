@@ -278,6 +278,7 @@
 | knowledge/references/js-extraction-regexes.md | Phase 1 JS 落盘后:敏感信息 grep 模式库(FindSomething+雪瞳合集,漏抓就往表里加) |
 | knowledge/references/compliance-rules.md | Phase 0 + 报告前(SRC 合规 TIER 分级) |
 | knowledge/references/src-discipline.md | 测试行为红线唯一权威(会话纪律/先加后清/类型取舍/禁停工请示;与报告三闸互补) |
+| knowledge/references/src-rules/README.md | 目标命中已知 SRC 平台(蚂蚁等):评分模型/定级锚点/无影响清单/计数规则/域名归属(报错家=白干) |
 | knowledge/references/decision-trees/README.md | Phase 2-3 参数特征命中:先读索引,再精读对应§决策树小文件(29棵) |
 | knowledge/references/response-chaining.md | Phase 2-5 响应链方法论 |
 | knowledge/references/discovery-amplification.md | Phase 2(端点→同类路径/参数榨干) |

@@ -17,6 +17,7 @@
 | **实战案例**（某站某洞的完整攻击路径复盘） | `experience/<漏洞类>.md` 台账 | ssrf.md 3案例/认证接管.md 6案例 |
 | **报告规范/评级/影响写法** | `system.md 报告三闸` + `rating-standard.md` + `impact-escalation.md` | 措辞/降级/危害量化 |
 | **Nday/组件利用链** | `references/cve-chains.md` + `references/1day/` | 指纹命中→grep 定位 |
+| **SRC 平台规则**(评分/受理/域名归属) | `references/src-rules/<平台>.md` | 目标注记命中平台名时(antsrc 已收) |
 | **工具用法**（怎么调自研/第三方工具） | `references/browser-probe-usage.md` 等工具同名文档 | browser_probe 五子命令 |
 | **阶段流程/门控** | `prompts/methodology.md`（唯一） | 相位门/读取表 §13 |
 

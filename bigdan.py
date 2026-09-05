@@ -263,6 +263,35 @@ PHASE_READ_INDEX_COND = {
 }
 
 
+
+# 平台规则(目标命中已知 SRC 平台 → BRIEF 注入该平台评分/受理规则;新增平台在 src-rules/ 建文件后登记于此)
+PLATFORM_RULES = [
+    (("蚂蚁", "antsrc", "alipay", "antfin", "aliloan"), "references/src-rules/antsrc.md",
+     "AntSRC: 金币=基础×应用系数(核心应用×10); 同域名同类型最多确认3个; 内网IP/域名泄露=无影响(SSRF需打出数据/凭证); "
+     "nday须附CVE+可利用PoC且公开>半年或平台未知晓; 域名归属先查§5(koubei/mall.alipay归ASRC别报错家)"),
+]
+
+
+def _platform_rules_section(target: dict, note: str) -> str:
+    """目标命中已知 SRC 平台 → 注入该平台的评分/受理规则节(备注或域名匹配)。"""
+    blob = f"{target.get('url') or ''} {note or ''} {target.get('id') or ''}".lower()
+    for keywords, rel, summary in PLATFORM_RULES:
+        f = Path(__file__).resolve().parent / "knowledge" / rel
+        if not f.is_file() or not any(k.lower() in blob for k in keywords):
+            continue
+        try:
+            body = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        body_norm = chr(10).join("  " + ln for ln in body.splitlines()[:60])
+        header = (chr(10) + "## 平台规则（目标命中 "
+                  + rel.split("/")[-1].replace(".md", "").upper()
+                  + "——定级/受理以本文件为准，全文 " + rel + "）" + chr(10))
+        return header + body_norm + chr(10)
+    return ""
+
+
+
 # ---------------------------------------------------------------- 阶段状态机（Safe-First 门控）
 
 def _recon_gate(job_dir: Path) -> tuple[bool, str]:
@@ -731,6 +760,9 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
                 + "\n".join(ck_lines) + "\n" + diff_hint
             )
 
+    # 平台规则(目标命中已知 SRC 平台 → 注入评分/受理规则;规则是阶段无关必知项)
+    platform_section = _platform_rules_section(target, target.get("note") or "")
+
     # 用户意图（建任务时人工填写的原始想法:哪里薄弱/想先测什么——优先级最高的方向指引）
     intent_section = ""
     it_f = job_dir / "intent.md"
@@ -771,6 +803,7 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
         f"\n"
         f"{linkage_section}"
         f"{user_input_section}"
+        f"{platform_section}"
         f"{intent_section}"
         f"{cred_section}"
         f"{cookie_section}"
