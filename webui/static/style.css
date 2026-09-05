@@ -232,7 +232,7 @@ pre.code.dim { color: var(--txt-dim); }
 .modal.wide .md-body h2 { font-size: 17px; margin: 14px 0 6px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
 .modal.wide .md-body h3 { font-size: 15px; margin: 12px 0 6px; }
 .modal.wide .md-body h4 { font-size: 14px; margin: 10px 0 4px; color: var(--txt-dim); }
-.modal.wide .md-body pre { background: var(--bg); padding: 10px 14px; border-radius: 6px; overflow-x: auto; font-size: 12.5px; line-height: 1.5; }
+.modal.wide .md-body pre { background: var(--bg); padding: 10px 14px; border-radius: 6px; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .modal.wide .md-body code { font-family: var(--mono); font-size: 12px; }
 .modal.wide .md-body table { border-collapse: collapse; width: 100%; margin: 8px 0; }
 .modal.wide .md-body table th, .modal.wide .md-body table td { border: 1px solid var(--line); padding: 5px 10px; text-align: left; }
