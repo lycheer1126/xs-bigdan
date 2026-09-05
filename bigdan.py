@@ -220,6 +220,7 @@ PHASE_READ_INDEX = {
     ],
     "linkage": [  # 🟡 普通测试: 值池联动/无认证扫/泛查询/IDOR（无条件注入；账号类见 COND 层）
         ("agents/api_fuzz/SKILL.md", "接口测试专家视角:全接口覆盖+产出标准"),
+        ("references/src-rules/common.md", "跨平台公约·市场判断:什么不收/什么值钱/性价比排序——先定方向再动手(不收清单即止损/同类型≤3/优先回显)"),
         ("skills/data_linkage/SKILL.md", "值池联动:JS需求表×响应值池=测试矩阵"),
         ("references/response-chaining.md", "响应链方法论:A 返回值→B 输入"),
         ("references/decision-trees/README.md", "参数特征命中→先读索引再精读对应§决策树小文件(29棵,防上下文泛滥)"),
@@ -236,6 +237,7 @@ PHASE_READ_INDEX = {
     ],
     "highrisk": [  # 🔴 条件阶段: mastermind 式价值确认(有 CONFIRMED 或 无 WAF)才进；WAF 存在全程 SAFE MODE
         ("agents/exploit/SKILL.md", "利用专家视角:FOUND≠CONFIRMED 三级分类"),
+        ("references/src-rules/common.md", "跨平台公约:市场判断(预算三律)+定级锚点——确认哪个/放弃哪个按这里取舍"),
         ("references/high-risk-probing.md", "高危探测细节(SQLi/CMD/SSTI/SSRF/XXE/越权)"),
         ("references/impact-escalation.md", "影响升级框架:证明实际危害"),
         ("references/advanced-techniques.md", "冷门高命中:幽灵位/WAF厂商矩阵/反序列化指纹/类型混淆/EL注入/XOR藏钥/缓存欺骗/竞态H2单包"),
