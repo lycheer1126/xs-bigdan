@@ -82,6 +82,37 @@ const XS = (() => {
     return mask;
   }
 
+  // 报告阅读弹窗：宽屏 + 全屏切换，任务页与历史页共用
+  function reportModal(name, content) {
+    const mask = modal(`
+      <div class="modal wide report-modal">
+      <div class="modal-head">
+        <span style="font-weight:700;font-size:14px">${esc(name)}</span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn sm" id="rpt-fs" title="全屏/退出全屏">⛶ 全屏</button>
+        <span class="x" style="cursor:pointer;margin-left:12px;font-size:17px" id="rpt-close">✕</span>
+      </div>
+      <div class="modal-body" style="max-height:calc(92vh - 110px);overflow:auto"><div class="md-body">${md(content)}</div></div>
+      <div class="modal-foot">
+        <button class="btn" id="md-copy">复制原文</button>
+        <button class="btn primary" id="md-close">关闭</button>
+      </div>`);
+    mask.querySelector("#rpt-close").addEventListener("click", () => mask.hidden = true);
+    mask.querySelector("#md-close").addEventListener("click", () => mask.hidden = true);
+    const modalEl = mask.querySelector(".modal");
+    mask.querySelector("#rpt-fs").addEventListener("click", () => {
+      const isFs = modalEl.style.position === "fixed";
+      modalEl.style.cssText = isFs ? "" :
+        "position:fixed;inset:0;width:100vw;height:100vh;max-height:100vh;border-radius:0;z-index:9999;overflow:auto";
+      mask.querySelector("#rpt-fs").textContent = isFs ? "⛶ 全屏" : "✕ 退出全屏";
+    });
+    mask.querySelector("#md-copy").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(content); toast("报告原文已复制", "ok"); }
+      catch { toast("复制失败", "error"); }
+    });
+    return mask;
+  }
+
   function poll(fn, ms) {
     const id = setInterval(fn, ms);
     state.timers.push(id);
@@ -159,7 +190,7 @@ const XS = (() => {
     route();
   }
 
-  return { api, toast, esc, md, fmtBytes, fmtDur, stateBadge, modal, poll, clearTimers, boot, ICONS };
+  return { api, toast, esc, md, fmtBytes, fmtDur, stateBadge, modal, reportModal, poll, clearTimers, boot, ICONS };
 })();
 
 document.addEventListener("DOMContentLoaded", () => XS.boot().catch(e => {

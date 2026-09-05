@@ -34,18 +34,7 @@ XSModules.history = (() => {
     el.querySelectorAll(".view-report").forEach(b =>
       b.addEventListener("click", async () => {
         const r = await XS.api(`/api/history/reports/${encodeURIComponent(b.dataset.name)}`);
-        const mask = XS.modal(`
-          <div class="modal-head">${XS.esc(r.name)} <span class="x">✕</span></div>
-          <div class="modal-body" style="max-height:72vh;overflow:auto"><div class="md-body">${XS.md(r.content)}</div></div>
-          <div class="modal-foot">
-            <button class="btn" id="md-copy">复制原文</button>
-            <button class="btn" id="md-close">关闭</button>
-          </div>`);
-        mask.querySelector("#md-close").addEventListener("click", () => mask.hidden = true);
-        mask.querySelector("#md-copy").addEventListener("click", async () => {
-          try { await navigator.clipboard.writeText(r.content); XS.toast("报告原文已复制", "ok"); }
-          catch { XS.toast("复制失败", "error"); }
-        });
+        XS.reportModal(r.name, r.content);
       }));
   }
 
