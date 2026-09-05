@@ -220,7 +220,7 @@ PHASE_READ_INDEX = {
     ],
     "linkage": [  # 🟡 普通测试: 值池联动/无认证扫/泛查询/IDOR（无条件注入；账号类见 COND 层）
         ("agents/api_fuzz/SKILL.md", "接口测试专家视角:全接口覆盖+产出标准"),
-        ("references/src-rules/common.md", "跨平台公约·市场判断:什么不收/什么值钱/性价比排序——先定方向再动手(不收清单即止损/同类型≤3/优先回显)"),
+        ("references/src-rules/common.md", "跨平台公约·市场判断:视野并集(URL跳转/CORS等低成分类目必测)+性价比排序+预算三律——先定方向再动手"),
         ("skills/data_linkage/SKILL.md", "值池联动:JS需求表×响应值池=测试矩阵"),
         ("references/response-chaining.md", "响应链方法论:A 返回值→B 输入"),
         ("references/decision-trees/README.md", "参数特征命中→先读索引再精读对应§决策树小文件(29棵,防上下文泛滥)"),
