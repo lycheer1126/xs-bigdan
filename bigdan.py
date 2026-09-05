@@ -251,10 +251,14 @@ PHASE_READ_INDEX = {
 # xs_auth/business_flow 无账号时读了白读还占上下文）
 # 条件名: has_account = BRIEF 注入了测试账号(creds) 或 任务目录有 cookies.txt
 PHASE_READ_INDEX_COND = {
+    "recon": [
+        ("skills/mail_code/SKILL.md", "JS/契约显示目标有邮箱注册流程且无账号:临时邮箱自动注册解锁登录态", "email_register"),
+    ],
     "linkage": [
         ("skills/xs_auth/SKILL.md", "登录口逻辑审计手册(JS审计→定向验证→接管链)", "has_account"),
         ("skills/business_flow/SKILL.md", "登录态功能点遍历(四问框架+寻路四式+返回包地图)", "has_account"),
         ("skills/type_juggling/SKILL.md", "PHP 栈指纹确认+认证/签名比对接口", "php_stack"),
+        ("skills/mail_code/SKILL.md", "目标有邮箱注册/验证流程且无账号:临时邮箱全自动注册+接码解锁登录态", "email_register"),
     ],
 }
 
@@ -474,6 +478,36 @@ def _php_stack_signal(job_dir: Path) -> bool:
             return True
     return False
 
+def _email_register_signal(job_dir: Path) -> bool:
+    """邮箱注册流程信号:契约端点/指纹/JS 提取物含 register|signup|activate 与 email 共现。"""
+    ep = job_dir / "evidence" / "_endpoint_params.json"
+    if ep.is_file():
+        try:
+            data = json.loads(ep.read_text(encoding="utf-8", errors="replace"))
+            for e in data.get("endpoints") or []:
+                path = str(e.get("path") or "").lower()
+                if re.search(r"regist|signup|sign_up|activate|verify", path) and re.search(
+                        r"email|mail|user", path + json.dumps(e.get("params_optional") or [])):
+                    return True
+        except (OSError, json.JSONDecodeError):
+            pass
+    for f in (job_dir / "evidence").glob("*.md"):
+        if f.stat().st_size > 100_000:
+            continue
+        try:
+            t = f.read_text(encoding="utf-8", errors="replace").lower()
+        except OSError:
+            continue
+        if re.search(r"regist|signup", t) and re.search(r"email|邮箱|邮件", t):
+            return True
+    return False
+
+
+def _registered_account_ok(job_dir: Path) -> bool:
+    """此前段已用临时邮箱注册过账号(落盘 _registered_account.txt)。"""
+    return (job_dir / "evidence" / "_registered_account.txt").is_file()
+
+
 def _credential_gate_ok(job_dir: Path) -> bool:
     """凭证门(BLOCKED AUTH_CREDENTIALS)前置门槛:无认证面已测过的落盘证据。
 
@@ -590,6 +624,7 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
     wordlist_paths = (tools_dir / "wordlists" / "paths.txt").as_posix()
     wordlist_params = (tools_dir / "wordlists" / "params.txt").as_posix()
     redir = (tools_dir / "bin" / "xsredir.py").as_posix()
+    mailcode = (tools_dir / "bin" / "mail_code.py").as_posix()
     ffuf_bin = next(iter(sorted((tools_dir / "bin").glob("ffuf*"))), tools_dir / "bin" / "ffuf")
 
     # 动态探测本机工具并注入（pi-recon"工具决定可见性"；失败不影响 BRIEF）
@@ -615,10 +650,12 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
     phase, basis = infer_phase(job_dir)
     read_idx = list(PHASE_READ_INDEX.get(phase, PHASE_READ_INDEX["recon"]))
     # 条件注入层:has_account(账号/Cookie 注入)才注入 xs_auth/business_flow,否则不占上下文
-    has_account = bool(creds) or (job_dir / "cookies.txt").is_file()
+    has_account = (bool(creds) or (job_dir / "cookies.txt").is_file()
+                   or _registered_account_ok(job_dir))
     cond_flags = {
         "has_account": has_account,
         "php_stack": _php_stack_signal(job_dir),
+        "email_register": _email_register_signal(job_dir),
     }
     for path, why, cond in PHASE_READ_INDEX_COND.get(phase, []):
         if cond_flags.get(cond):
@@ -741,6 +778,7 @@ def write_brief(job_dir: Path, target: dict, scope: List[str], segs: int, seg_id
         f"## 工具（绝对路径，直接 `python <路径> ...` 调用，不要 which/find 找）\n"
         f"- 请求: `python {req} <url> [--method POST] [--data '...'] [--json '{{...}}'] [--header 'K: V'] [--save 文件名]`\n"
         f"- 枚举: `python {enum} <base-url> [--wordlist 文件] [--limit N]`\n"
+        f"- 邮箱接码(目标有邮箱注册流程时): `python {mailcode} create` 建临时邮箱 → 注册触发验证邮件 → `python {mailcode} poll --address <地址> --password <密码>` 收验证码 → 注册成功把账号写 evidence/_registered_account.txt(跨段续命)\n"
         f"- 开放重定向: `python {redir} <url模板:参数值用 FUZZ 占位|基础URL+--params a,b> [--oob 你的dnslog域]` —— 参数×重定向payload矩阵,Location 含标记=实锤,同域跳转自动标误报\n"
         f"- 浏览器分析(SPA必用): `python {browser} open|js|chunks|login|snow <url> ...` —— 渲染后DOM/console/XHR/执行JS/mock登录/雪瞳26类提取;高难站先走JS驱动(见读取索引)\n"
         f"- 路径字典: `{wordlist_paths}`(轻探档103条,xsenum默认)\n"
