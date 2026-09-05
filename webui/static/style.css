@@ -45,14 +45,18 @@ body {
   box-shadow: 0 2px 8px rgba(14,165,196,.30);
 }
 .logo-mark svg { display: block; }
-/* 印文:衬线体 X/S 竖排,配内圈阴刻边框,如一方小印 */
+/* 印文:衬线体 X/S 对角排布,配内圈阴刻边框,如一方小印 */
 .seal-glyph {
   fill: #ffffff;
-  font: 700 12.5px Georgia, "Times New Roman", "Noto Serif SC", serif;
+  font: 700 13px Georgia, "Times New Roman", serif;
   text-anchor: middle;
 }
-.logo-text b { display: block; font-size: 15px; letter-spacing: .3px; }
-.logo-text span { font-size: 11px; color: var(--txt-faint); }
+.logo-text b {
+  display: block;
+  font: italic 700 18px "Playfair Display", Georgia, "Times New Roman", serif;
+  letter-spacing: .4px;
+}
+.logo-text span { font-size: 10.5px; color: var(--txt-faint); font-variant: small-caps; letter-spacing: 2.5px; }
 .nav { flex: 1; padding: 12px 10px; overflow-y: auto; }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
