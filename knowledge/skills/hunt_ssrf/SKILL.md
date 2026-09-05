@@ -230,6 +230,7 @@ hg 跟取即出元数据/钥匙。RFC1918 Forbidden ≠ 元数据域名也拦。
 ```
 Step 1  枚举 URL 类参数：browser_probe open/xhr 抓 XHR 参数、ffuf -w paramDict 扫 ?url=
         （含 JS 里挖出的业务参数名,最高信噪比）
+        ↳ 同批参数顺带测开放重定向: `tools/bin/xsredir.py`（payload 含 evil.com 变体系,Location 判定）
 Step 2  每类参数先打 OOB（dnslog 子标签区分 sink）→ 有回调=SSRF 确认,进 Step 3
 Step 3  云元数据表逐条打（§3）→ 有内容=凭证级
 Step 4  内网探测分层（每层只证明可达,不深挖）:

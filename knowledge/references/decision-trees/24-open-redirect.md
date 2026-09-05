@@ -1,4 +1,8 @@
 # §24 Open Redirect
+
+> 工具化: `tools/bin/xsredir.py` — payload 库 `tools/wordlists/redirect-payloads.txt`
+> (UrlRedirectScan V1.2.0 内置表提取+补充,21 条解析器混淆变体;参数 26 个已内置)。
+> 用法: `xsredir.py "<url?param=FUZZ>"` 或基础 URL+`--params next,redirect,url`;Location 含标记=实锤,同域跳转自动标误报,`--oob 你的dnslog` 追加盲打。
 ### 凭据外带检查（跳转类漏洞的危害升级位, 2026-08 实战）
 
 登录/鉴权跳转的回链必须**逐字符审计**: token/ticket/code/sessionId 拼在跳转 URL 的
