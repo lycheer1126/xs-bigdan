@@ -73,19 +73,19 @@ const XS = (() => {
     return `<span class="badge ${st}">${map[st] || st}</span>`;
   }
 
-  function modal(html) {
+  function modal(html, cls = "") {
     const mask = document.getElementById("modal-mask");
     mask.hidden = false;
-    mask.innerHTML = `<div class="modal">${html}</div>`;
+    mask.innerHTML = `<div class="modal ${cls}">${html}</div>`;
     mask.querySelector(".modal-head .x")?.addEventListener("click", () => mask.hidden = true);
     mask.addEventListener("click", e => { if (e.target === mask) mask.hidden = true; });
     return mask;
   }
 
   // 报告阅读弹窗：默认全屏（遮罩转实底铺满），可切宽窗；宽窗可拖动。任务页与历史页共用
+  // 注意:modal() 外层只包一层 .modal——此前在此再嵌一层 .modal.wide 导致窗口化时被外层 560px 裁切
   function reportModal(name, content) {
     const mask = modal(`
-      <div class="modal wide report-modal">
       <div class="modal-head">
         <span style="font-weight:700;font-size:14px">${esc(name)}</span>
         <span class="spacer" style="flex:1"></span>
@@ -96,7 +96,7 @@ const XS = (() => {
       <div class="modal-foot">
         <button class="btn" id="md-copy">复制原文</button>
         <button class="btn primary" id="md-close">关闭</button>
-      </div>`);
+      </div>`, "wide report-modal");
     mask.querySelector("#rpt-close").addEventListener("click", () => mask.hidden = true);
     mask.querySelector("#md-close").addEventListener("click", () => mask.hidden = true);
     const modalEl = mask.querySelector(".modal");

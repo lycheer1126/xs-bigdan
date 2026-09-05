@@ -194,6 +194,102 @@ def _impact_from_evidence(text: str) -> str:
     return ""
 
 
+def _impact_block(text: str, limit: int = 1200) -> str:
+    """证据中的「影响说明/危害」整块内容——保持多行列表结构（单行压缩会糊成一团）。"""
+    lines = text.splitlines()
+    out, on = [], False
+    for ln in lines:
+        if not on:
+            if re.match(r"^\s*(?:影响说明|危害说明|危害描述|影响分析|影响|危害)\s*[:：]?\s*$", ln):
+                on = True
+                continue
+            m = re.match(r"^\s*(?:影响说明|危害说明|危害描述|影响分析|影响|危害)\s*[:：]\s*(\S.*)$", ln)
+            if m:
+                out.append(m.group(1).rstrip())
+                on = True
+            continue
+        # 已进入影响块：遇到下一小节标题（额外发现/修复/复现等，或"xxx:"形态的裸标题行）即止
+        if re.match(r"^\s*[-*•]?\s*(?:额外发现|修复建议|修复方案|修复|备注|参考|复现请求|复现步骤|关键响应|验证方式|验证)\s*[:：]?", ln):
+            break
+        s = ln.strip()
+        if s and not s.startswith(("-", "*", "•")) and s.endswith(("：", ":")):
+            break
+        if s:
+            out.append(ln.rstrip())
+    block = "\n".join(out).strip()
+    if not block:
+        return ""
+    return block[:limit] + ("\n...(截断)" if len(block) > limit else "")
+
+
+# 危害说明兜底话术（按类型给实质句子——报告里禁止出现"见证据文件"这类推诿）
+_IMPACT_GENERIC: List[Tuple[Tuple[str, ...], str]] = [
+    (("信息泄露", "泄露", "暴露", "枚举"),
+     "该问题向未授权方暴露内部信息（网络拓扑/源码片段/接口结构/敏感标识等），可被攻击者用于绘制目标结构、定位高价值资产，显著提升后续攻击的成功率。"),
+    (("敏感信息", "密钥", "硬编码", "凭据", "口令", "密码"),
+     "敏感数据随公开渠道分发，任何获取方无需授权即可直接读取利用；若为加密密钥/凭据，可解密或冒充合法会话，机密性与真实性同时受损。"),
+    (("越权", "idor"), "越权漏洞使攻击者可绕过归属校验，跨用户/跨租户直接读取或操作他人数据，权限边界整体失效，属高危。"),
+    (("未授权",), "接口无需登录即可调用，未认证攻击者可直接获取受保护数据或执行业务操作，认证防线对该接口完全失效。"),
+    (("上传",), "攻击者可上传任意内容获取 Web 访问路径，配合解析漏洞可升级为远程代码执行，服务器完整沦陷。"),
+    (("sql",), "攻击者可通过构造输入操控数据库查询，读取/篡改/删除任意数据，必要时可进一步获取服务器权限。"),
+    (("xss",), "攻击者可在受害者浏览器中执行任意脚本，窃取会话 Cookie、冒充用户操作，配合钓鱼几乎无法被察觉。"),
+    (("ssrf",), "服务端被诱导向任意地址发起请求，可探测内网拓扑、访问内部系统，云环境下可直接获取云凭证接管基础设施。"),
+    (("弱口令", "爆破", "无限流", "限流", "轰炸"),
+     "认证/发送类接口缺少频控，攻击者可高速穷举或骚扰用户（短信轰炸），造成凭据失陷与业务骚扰。"),
+    (("重定向", "redirect"), "跳转目标可被攻击者控制，被用于钓鱼跳转并窃取用户凭据，同时稀释主站域名信誉。"),
+]
+_IMPACT_DEFAULT = "结合下方复现数据包与关键响应可见：攻击者可在无需特定前提的情况下获取本不应暴露的数据或能力，直接损害系统机密性/完整性。"
+
+
+def _impact_for(f: dict, ev_text: str) -> str:
+    """危害说明三级兜底：证据影响块 → 影响单行 → 按类型话术。绝不输出"见证据文件"。"""
+    block = _impact_block(ev_text)
+    if block:
+        return block
+    line = _impact_from_evidence(ev_text)
+    if line:
+        return line
+    text = f"{f.get('type') or ''} {f.get('title') or ''}".lower()
+    for keywords, impact in _IMPACT_GENERIC:
+        for kw in keywords:
+            if kw.lower() in text:
+                return impact
+    return _IMPACT_DEFAULT
+
+
+def _full_title(f: dict, job_dir: Path) -> str:
+    """标题恢复：agent 打 FINDING 时标题被截断(以 .../… 结尾) → 从证据文件「标题:」行找回全文。"""
+    t = (f.get("title") or "").strip()
+    if t.endswith(("...", "…")) and f.get("file"):
+        evp = job_dir / "evidence" / Path(f["file"]).name
+        if evp.is_file():
+            try:
+                m = re.search(r"(?m)^\s*标题\s*[:：]\s*(.+)$",
+                              evp.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                m = None
+            if m:
+                full = m.group(1).strip()
+                if len(full) > len(t.rstrip(".…")):
+                    return full
+    return t or "(未命名)"
+
+
+def _status_badge(f: dict) -> str:
+    """状态徽标：确认/降级/待确认/信息，一眼可辨——降级项必须带原因摘要。"""
+    if f.get("triage_reason"):
+        r = str(f["triage_reason"]).strip()
+        return f"⚠️ **已降级**（{r[:40]}{'…' if len(r) > 40 else ''}）"
+    if f.get("format_error"):
+        return "⚠️ **已降级**（FINDING 格式异常，待人工复核）"
+    st = f.get("status") or "CONFIRMED"
+    return {
+        "CONFIRMED": "✅ **已确认**（CONFIRMED，证据完整可提交）",
+        "PENDING": "⏳ **待确认**（PENDING，尚未闭环）",
+        "INFO": "ℹ️ **信息**（INFO，多数平台不收）",
+    }.get(st, st)
+
+
 def _check_evidence(job_dir: Path, f: dict) -> tuple:
     """triage 证据检查:文件存在且内容 >20 字符才算完整。"""
     if not f.get("file"):
@@ -372,27 +468,30 @@ def _split_target_host(url_or_path: str) -> tuple:
 
 
 def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "") -> List[str]:
-    """单个漏洞详情（对齐 SRC 提交模板:漏洞地址/漏洞等级/详细说明/漏洞证明/修复方案；
-    Payload 与响应均为原始 HTTP 数据包——可直接重放复现，非 curl 命令）。"""
+    """单个漏洞详情——扁平四段，一段只说一件事、每项信息只出现一次：
+
+      标题 + 元信息行（等级/类型/状态徽标/业务）
+      一、漏洞地址
+      二、危害说明（从证据提取影响原文，兜底按类型话术——禁止"见证据文件"）
+      三、复现数据包（原始 HTTP 请求 + 关键响应，唯一出处，可直接重放）
+      四、修复方案
+
+    不再内联证据全文（其内容已拆入二/三），不再重复漏洞地址，不再嵌套小节。
+    """
     level, icon = _risk_of(f)
-    lines = [f"### 漏洞{i}：{f.get('title') or '(未命名)'}", ""]
-    lines.append(f"**漏洞等级**: {icon} {level} | **漏洞类型**: {f.get('type') or '未标注'} | "
-                 f"**状态**: {f.get('status') or 'CONFIRMED'}"
-                 + (f" | **涉及业务**: {note}" if note else ""))
+    title = _full_title(f, job_dir)
+    lines = [f"### 漏洞{i}：{title}", ""]
+    meta = [f"**风险等级**: {icon} {level}（机器按类型关键词推断，提交前人工校准）",
+            f"**漏洞类型**: {f.get('type') or '未标注'}",
+            f"**状态**: {_status_badge(f)}"]
+    if note:
+        meta.append(f"**涉及业务**: {note}")
+    lines.append(" | ".join(meta))
     lines.append("")
 
     evp = None
     if f.get("file"):
         evp = job_dir / "evidence" / Path(f["file"]).name
-        ok, reason = _check_evidence(job_dir, f)
-        if not ok:
-            lines.append(f"> ⚠️ 证据检查未过: {reason}")
-        if f.get("triage_reason"):
-            lines.append(f"> ⚠️ triage 硬门: {f['triage_reason']}")
-        if f.get("format_error"):
-            lines.append(f"> ⚠️ 格式异常: {f['format_error']}")
-        lines.append("")
-
     ev_text = evp.read_text(encoding="utf-8", errors="replace") if evp and evp.is_file() else ""
 
     # 一、漏洞地址
@@ -403,46 +502,22 @@ def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "") -> List[str]
         for u in urls:
             lines.append(f"- `{u}`")
     else:
-        lines.append("- 见「四、漏洞证明」数据包中的请求行")
+        lines.append("- 见下方复现数据包请求行")
     lines.append("")
 
-    # 二、漏洞等级
-    lines.append("#### 二、漏洞等级")
+    # 二、危害说明（证据影响原文 / 按类型话术，绝不含"见证据文件"）
+    lines.append("#### 二、危害说明")
     lines.append("")
-    lines.append(f"{icon} **{level}**（机器按漏洞类型关键词推断，提交前按平台收录标准人工校准）")
+    lines.append(_impact_for(f, ev_text))
     lines.append("")
 
-    # 三、详细说明（涉及业务 / 危害描述 / 漏洞细节全文）
-    lines.append("#### 三、详细说明")
+    # 三、复现数据包（原始 HTTP 请求 + 关键响应——全文唯一出处）
+    lines.append("#### 三、复现数据包")
     lines.append("")
-    if note:
-        lines.append(f"**涉及业务**: {note}")
-        lines.append("")
-    impact = _impact_from_evidence(ev_text)
-    lines.append(f"**危害描述**: {impact or '见证据文件中的响应差异与影响说明'}")
-    lines.append("")
-    if evp and evp.is_file():
-        lines.append("**漏洞细节（证据全文，含复现步骤与响应）**:")
-        lines.append("")
-        lines.append(_evidence_block(evp))
-        lines.append("")
-
-    # 四、漏洞证明（原始数据包——可直接重放）
-    lines.append("#### 四、漏洞证明")
-    lines.append("")
-    urls = _evidence_urls(ev_text)
-    if urls:
-        lines.append("**【接口地址(Target)】**")
-        lines.append("")
-        for u in urls:
-            lines.append(f"- `{u}`")
-        lines.append("")
     req_raw, resp_raw = _raw_http_from_evidence(ev_text)
     if not req_raw:
         req_raw = _evidence_raw_request(ev_text)
     if req_raw:
-        lines.append("**【Payload数据包(Raw)】**:")
-        lines.append("")
         lines.append("```http")
         lines.append(req_raw)
         lines.append("```")
@@ -454,11 +529,14 @@ def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "") -> List[str]
         lines.append("")
         lines.append(f"```\n{resp_raw}\n```")
         lines.append("")
+    if not req_raw and not resp_raw:
+        lines.append("> 该证据未提取到结构化请求/响应，请对照 evidence 目录原始文件复核。")
+        lines.append("")
 
-    # 五、修复方案
-    lines.append("#### 五、修复方案")
+    # 四、修复方案
+    lines.append("#### 四、修复方案")
     lines.append("")
-    lines.append(f"**【修复建议】**: {_fix_for(f)}")
+    lines.append(_fix_for(f))
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -514,10 +592,8 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
     lines: List[str] = []
     lines.append("# 渗透测试报告")
     lines.append("")
-    lines.append(f"- 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append(f"- 测试目标数: {len(summaries)}")
-    lines.append("- 测试方式: 黑盒（仅凭输入 URL，无源码/凭据）")
-    lines.append("- 授权范围: 仅测试清单内目标，禁止越界")
+    lines.append(f"**生成时间** {datetime.now().strftime('%Y-%m-%d %H:%M')} · **目标数** {len(summaries)} · "
+                 f"**方式** 黑盒（仅凭输入 URL） · **范围** 仅测试清单内目标，禁止越界")
     lines.append("")
 
     def _count(status: str) -> int:
@@ -597,7 +673,7 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
         lines.append("")
 
         all_findings = [f for f in by_status["CONFIRMED"] + by_status["PENDING"] + by_status["INFO"]]
-        if all_findings or clues:
+        if all_findings:
             lines.append("### 漏洞总结")
             lines.append("")
             lines.append("| 序号 | 漏洞名称 | 风险等级 | 状态 |")
@@ -606,15 +682,12 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
             for f in all_findings:
                 i += 1
                 level, icon = _risk_of(f)
-                if f.get("triage_reason") or f.get("format_error"):
-                    st = "⚠️ 降级"
-                else:
-                    st = {"CONFIRMED": "✅ 确认", "PENDING": "⏳ 待确认", "INFO": "ℹ️ 信息"}.get(
-                        f.get("status") or "CONFIRMED", f.get("status") or "确认")
-                lines.append(f"| {i} | **{f.get('title') or '(未命名)'}** | {icon} {level} | {st} |")
-            for c in clues:
-                i += 1
-                lines.append(f"| {i} | `{c.name}`（证据线索，未登记 FINDING） | ⚪ 待评估 | ⚠️ 待复核 |")
+                lines.append(f"| {i} | **{_full_title(f, job_dir)}** | {icon} {level} | {_status_badge(f)} |")
+            lines.append("")
+        elif clues:
+            lines.append("### 漏洞总结")
+            lines.append("")
+            lines.append(f"无登记漏洞；另有 {len(clues)} 条证据线索待人工复核（见下方「证据线索」）。")
             lines.append("")
         else:
             lines.append("### 漏洞总结")
@@ -646,7 +719,7 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
                 extra = ""
                 if f.get("format_error") and not f.get("triage_reason"):
                     extra = "；证据文件可能已落盘（agent 打 FINDING 时格式坏了），请人工核对 evidence/ 目录"
-                lines.append(f"- **{f.get('title') or '(未命名)'}**（类型: {f.get('type') or '未标注'}）"
+                lines.append(f"- **{_full_title(f, job_dir)}**（类型: {f.get('type') or '未标注'}）"
                              f"—— {reason}{extra}"
                              + (f"；原证据文件: `{f['file']}`" if f.get("file") else ""))
                 # 证据内容内联（复现步骤直接可看,不用翻 evidence 目录）
