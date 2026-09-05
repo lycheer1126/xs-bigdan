@@ -226,7 +226,26 @@ pre.code.dim { color: var(--txt-dim); }
   width: min(560px, 92vw); max-height: 86vh; overflow: auto;
   box-shadow: 0 18px 48px rgba(15,23,42,.18);
 }
-.modal.wide { width: min(1400px, 96vw); max-height: 92vh; }
+.modal.wide { width: min(1600px, 96vw); max-height: 92vh; }
+/* 报告全屏态：遮罩转实底、弹窗铺满视口（保持 flex 居中，无留白） */
+.modal-mask.fs { background: var(--bg-2); }
+.modal-mask.fs .modal {
+  width: 100vw; height: 100vh; max-height: 100vh;
+  border: none; border-radius: 0; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.modal-mask.fs .modal-body { flex: 1; max-height: none !important; }
+.report-modal .modal-head { cursor: grab; }
+.modal-mask.fs .report-modal .modal-head { cursor: default; }
+/* 任务搜索栏 */
+.search-bar { display: flex; gap: 8px; margin-bottom: 10px; }
+.search-bar input {
+  flex: 1; height: 36px; padding: 0 12px; font-size: 13.5px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg-2); color: var(--txt); outline: none;
+}
+.search-bar input:focus { border-color: var(--accent); }
+.search-bar .btn { height: 36px; }
 .modal.wide .md-body { font-size: 13.5px; line-height: 1.7; padding: 18px 22px; }
 .modal.wide .md-body h1 { font-size: 20px; margin: 16px 0 8px; }
 .modal.wide .md-body h2 { font-size: 17px; margin: 14px 0 6px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }

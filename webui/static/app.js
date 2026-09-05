@@ -82,14 +82,14 @@ const XS = (() => {
     return mask;
   }
 
-  // 报告阅读弹窗：默认全屏打开，可窗口化；任务页与历史页共用
+  // 报告阅读弹窗：默认全屏（遮罩转实底铺满），可切宽窗；宽窗可拖动。任务页与历史页共用
   function reportModal(name, content) {
     const mask = modal(`
       <div class="modal wide report-modal">
       <div class="modal-head">
         <span style="font-weight:700;font-size:14px">${esc(name)}</span>
         <span class="spacer" style="flex:1"></span>
-        <button class="btn sm" id="rpt-fs" title="全屏/窗口切换">⤢ 窗口化</button>
+        <button class="btn sm" id="rpt-fs" title="全屏/宽窗切换">⤢ 窗口化</button>
         <span class="x" style="cursor:pointer;margin-left:12px;font-size:17px" id="rpt-close">✕</span>
       </div>
       <div class="modal-body" style="max-height:calc(92vh - 110px);overflow:auto"><div class="md-body">${md(content)}</div></div>
@@ -101,13 +101,32 @@ const XS = (() => {
     mask.querySelector("#md-close").addEventListener("click", () => mask.hidden = true);
     const modalEl = mask.querySelector(".modal");
     const fsBtn = mask.querySelector("#rpt-fs");
-    const FS_CSS = "position:fixed;inset:0;width:100vw;height:100vh;max-height:100vh;border-radius:0;z-index:9999;overflow:auto";
+    let dx = 0, dy = 0;
     const applyFs = (on) => {
-      modalEl.style.cssText = on ? FS_CSS : "";
+      mask.classList.toggle("fs", on);
+      dx = dy = 0;
+      modalEl.style.transform = "";
       fsBtn.textContent = on ? "⤢ 窗口化" : "⛶ 全屏";
     };
     applyFs(true); // 报告以阅读为先，默认全屏
-    fsBtn.addEventListener("click", () => applyFs(modalEl.style.position !== "fixed"));
+    fsBtn.addEventListener("click", () => applyFs(!mask.classList.contains("fs")));
+    // 宽窗态：按住标题栏拖动
+    mask.querySelector(".modal-head").addEventListener("pointerdown", (e) => {
+      if (mask.classList.contains("fs")) return;
+      if (e.target.closest("button,.x")) return;
+      e.preventDefault();
+      const sx = e.clientX - dx, sy = e.clientY - dy;
+      const move = (ev) => {
+        dx = ev.clientX - sx; dy = ev.clientY - sy;
+        modalEl.style.transform = `translate(${dx}px, ${dy}px)`;
+      };
+      const up = () => {
+        removeEventListener("pointermove", move);
+        removeEventListener("pointerup", up);
+      };
+      addEventListener("pointermove", move);
+      addEventListener("pointerup", up);
+    });
     mask.querySelector("#md-copy").addEventListener("click", async () => {
       try { await navigator.clipboard.writeText(content); toast("报告原文已复制", "ok"); }
       catch { toast("复制失败", "error"); }

@@ -13,6 +13,7 @@ XSModules.tasks = (() => {
   let logFile = "";
   let groupFilter = "";  // 看板分组筛选: ""=全部, "__none__"=未分组, 组名=只看该组
   let searchFilter = ""; // 搜索筛选: 匹配任务 ID/URL/备注
+  let searchDraft = "";  // 搜索框输入草稿: 未点搜索前不被提交, 5s 刷新不丢字
 
   /* 漏洞类型英文 → 中文（看板/详情展示；已是中文的原样透传） */
   const VULN_CN = {
@@ -127,10 +128,10 @@ XSModules.tasks = (() => {
           (j.id || "").toLowerCase().includes(q));
       }
       const searchBar = `
-        <div style="margin-bottom:10px">
+        <div class="search-bar">
           <input id="task-search" spellcheck="false" placeholder="搜索：备注 / URL / 任务ID…"
-            value="${XS.esc(searchFilter)}" autocomplete="off"
-            style="width:100%;padding:6px 10px;font-size:13px;border:1px solid var(--border,#333);border-radius:6px;background:var(--bg,#1a1a2e);color:var(--fg,#eee)">
+            value="${XS.esc(searchDraft || searchFilter)}" autocomplete="off">
+          <button class="btn" id="task-search-go" title="点击搜索（也可按回车）">🔍 搜索</button>
         </div>`;
       const grpBar = `
         <div class="grp-bar">
@@ -173,11 +174,15 @@ XSModules.tasks = (() => {
       // 搜索框:恢复输入值 + 实时过滤卡片(自动刷新不丢状态)
       const searchEl = el.querySelector("#task-search");
       if (searchEl) {
-        searchEl.value = searchFilter;
-        searchEl.addEventListener("input", () => {
+        // 输入只存草稿（防 5s 自动刷新丢字），点按钮或回车才真正搜索
+        searchEl.addEventListener("input", () => { searchDraft = searchEl.value; });
+        const doSearch = () => {
           searchFilter = searchEl.value.trim().toLowerCase();
+          searchDraft = searchEl.value;
           applySearchFilter();
-        });
+        };
+        searchEl.addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+        el.querySelector("#task-search-go").addEventListener("click", doSearch);
         applySearchFilter();
       }
     } catch (e) { XS.toast("列表刷新失败: " + e.message, "error"); }
