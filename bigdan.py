@@ -474,18 +474,6 @@ def _php_stack_signal(job_dir: Path) -> bool:
             return True
     return False
 
-    for f in ev.rglob("*"):
-        if not f.is_file() or f.stat().st_size > 200_000:
-            continue
-        try:
-            t = f.read_text(encoding="utf-8", errors="replace").lower()
-        except OSError:
-            continue
-        if "cname" in t or "subdomain" in t or "子域" in t:
-            return True
-    return False
-
-
 def _credential_gate_ok(job_dir: Path) -> bool:
     """凭证门(BLOCKED AUTH_CREDENTIALS)前置门槛:无认证面已测过的落盘证据。
 
