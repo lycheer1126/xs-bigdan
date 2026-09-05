@@ -41,8 +41,15 @@ body {
 .logo-mark {
   width: 34px; height: 34px; border-radius: 9px;
   background: linear-gradient(135deg, #0ea5c4, #2fd3c0);
-  color: #ffffff; font-weight: 800; font-size: 13px;
   display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(14,165,196,.30);
+}
+.logo-mark svg { display: block; }
+/* 印文:衬线体 X/S 竖排,配内圈阴刻边框,如一方小印 */
+.seal-glyph {
+  fill: #ffffff;
+  font: 700 12.5px Georgia, "Times New Roman", "Noto Serif SC", serif;
+  text-anchor: middle;
 }
 .logo-text b { display: block; font-size: 15px; letter-spacing: .3px; }
 .logo-text span { font-size: 11px; color: var(--txt-faint); }
