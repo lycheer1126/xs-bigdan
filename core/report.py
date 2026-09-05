@@ -207,6 +207,118 @@ _RAW_REQ_RE = re.compile(
 )
 
 
+def _split_target(url: str) -> tuple:
+    """URL → (path?query, host)。把绝对 URL 请求行还原成原始报文形态。"""
+    m = re.match(r"[a-zA-Z]+://([^/]+)(/?.*)$", url or "")
+    if m:
+        return (m.group(2) or "/"), m.group(1)
+    return (url or "/"), ""
+
+
+def _assemble_raw(method: str, url: str, headers, body: str = "") -> str:
+    """(方法, URL, 头列表, body) → 标准原始 HTTP 请求报文（请求行含路径，Host 单独成头）。"""
+    from urllib.parse import urlsplit
+    u = urlsplit(url or "")
+    path = u.path or "/"
+    if u.query:
+        path += "?" + u.query
+    host = u.netloc
+    lines = [f"{method.upper()} {path} HTTP/1.1"]
+    if host:
+        lines.append(f"Host: {host}")
+    for k, v in headers or []:
+        if k.lower() == "host":
+            continue
+        lines.append(f"{k}: {v}")
+    if body:
+        lines.append("")
+        lines.append(body)
+    return "\n".join(lines)
+
+
+def _curl_to_raw(curl: str) -> str:
+    """curl 命令 → 原始 HTTP 请求报文（方法/-H 头/--data body/URL 解析；SRC 提交格式）。"""
+    method = "GET"
+    headers = []
+    body = ""
+    url = ""
+    toks = re.findall(r'"[^"]*"|\'[^\']*\'|\S+', curl or "")
+    i = 0
+    while i < len(toks):
+        tk = toks[i].strip("\"'")
+        low = tk.lower()
+        if low in ("-x", "--request") and i + 1 < len(toks):
+            method = toks[i + 1].strip("\"'").upper()
+            i += 2
+            continue
+        if low in ("-h", "--header") and i + 1 < len(toks):
+            hv = toks[i + 1].strip("\"'")
+            if ":" in hv:
+                k, _, v = hv.partition(":")
+                headers.append((k.strip(), v.strip()))
+            i += 2
+            continue
+        if low in ("-d", "--data", "--data-raw", "--data-binary", "--json") and i + 1 < len(toks):
+            body = toks[i + 1]
+            i += 2
+            continue
+        if tk.lower().startswith(("http://", "https://")) and not url:
+            url = tk
+        i += 1
+    return _assemble_raw(method, url, headers, body)
+
+
+def _raw_http_from_evidence(ev_text: str):
+    """从 xsreq --save 证据还原 (原始请求报文, 原始响应报文)——SRC 提交格式的数据包来源。
+
+    证据格式（xsreq --save）:
+      # status=200 ...
+      === REQUEST ===
+      GET https://host/path
+      头: 值...
+      === RESPONSE HEADERS === ...
+      === RESPONSE BODY === ...
+    REQUEST 段为 curl 命令形态时走 _curl_to_raw 兜底。
+    """
+    req_raw, resp_raw = "", ""
+    m = re.search(r"=== REQUEST ===\n(.*?)(?=\n?=== RESPONSE|\Z)", ev_text, re.S)
+    if m:
+        block = m.group(1).strip()
+        parts = block.split("\n", 1)
+        head_line = parts[0] if parts else ""
+        rest = parts[1] if len(parts) > 1 else ""
+        mm = re.match(r"([A-Z]+)\s+(\S+)", head_line)
+        if mm and "curl" not in head_line:
+            url = mm.group(2)
+            hdrs = []
+            for hl in rest.splitlines():
+                if ":" in hl:
+                    k, _, v = hl.partition(":")
+                    hdrs.append((k.strip(), v.strip()))
+            path, host = _split_target(url)
+            lines = [f"{mm.group(1)} {path} HTTP/1.1", f"Host: {host}"]
+            lines += [f"{k}: {v}" for k, v in hdrs]
+            req_raw = "\n".join(lines)
+        elif block.startswith("curl"):
+            req_raw = _curl_to_raw(block.splitlines()[0])
+    m2 = re.search(r"#\s*status=(\d+)", ev_text)
+    status = m2.group(1) if m2 else "200"
+    mh = re.search(r"=== RESPONSE HEADERS ===\n(.*?)(?=\n?=== RESPONSE BODY|\Z)", ev_text, re.S)
+    mb = re.search(r"=== RESPONSE BODY ===\n(.*)\Z", ev_text, re.S)
+    if mh or mb:
+        headers = mh.group(1).strip() if mh else ""
+        body = mb.group(1).strip() if mb else ""
+        resp_raw = f"HTTP/1.1 {status}\n{headers}"
+        if body:
+            resp_raw += "\n\n" + body
+    return req_raw, resp_raw
+
+
+def _split_cookie_line(cookie_header: str) -> str:
+    """Cookie 头过长时按 '; ' 折行展示（报告可读性）。"""
+    return (";\n" + " " * 7).join(cookie_header.split("; "))
+
+
 def _evidence_urls(text: str) -> List[str]:
     """从证据文本提取接口地址（URL: 行优先,独立 https URL 补充——SRC 提交 Target 可多列）。"""
     urls: List[str] = []
@@ -222,29 +334,45 @@ def _evidence_urls(text: str) -> List[str]:
 
 
 def _evidence_raw_request(text: str) -> str:
-    """从证据提取完整请求包（HTTP 原始包优先,curl 命令兜底）——SRC 提交 Payload 包。
-
-    容错:请求行支持无 HTTP 版本号(如"请求: POST /path"半格式,旧数据),"请求:"前缀可选。
-    """
+    """从证据提取完整请求包（xsreq 保存格式优先还原为标准原始包;半格式/curl 兜底）。"""
+    text = text.rstrip("\n") + "\n"  # 归一化:确保尾行有换行,否则尾行头匹配不上
+    req, _ = _raw_http_from_evidence(text)
+    if req:
+        return req
     for m in re.finditer(
             r"(?m)(?:^\s*(?:请求|Request|Payload)\s*[:：]\s*)?"
             r"((?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+(?:\s+HTTP/\d(?:\.\d)?)?\n"
             r"(?:[A-Za-z0-9-]+:\s*[^\n]*\n)*)(?:\n|\Z)", text):
         block = m.group(1).strip()
         if len(block) > 40:
-            return block
+            head_parts = block.split("\n", 1)[0].split()
+            host, path = _split_target_host(head_parts[1] if len(head_parts) > 1 else "")
+            if host:  # 绝对 URL 形态 → 重建为 路径 + Host(标准原始包形态)
+                lines = [f"{block.split()[0]} {path} HTTP/1.1", f"Host: {host}"]
+                lines += block.splitlines()[1:]
+                return "\n".join(lines)
+            return block  # 路径形态(已含 Host 头)→ 原样保留
     for m in re.finditer(r"(?m)(curl\s+-[^\n]{20,})", text):
-        return m.group(1).strip()
+        return _curl_to_raw(m.group(1).strip())
     return ""
 
 
-def _finding_detail(i: int, f: dict, job_dir: Path) -> List[str]:
-    """单个漏洞详情（SRC 提交标准格式:危害描述/接口地址/Payload 包/修复建议）。"""
+def _split_target_host(url_or_path: str) -> tuple:
+    """从请求行第二段(绝对 URL 或路径)取 (host, path)。"""
+    m = re.match(r"(?:[a-zA-Z]+://)?([^/]+)(/.*)?$", url_or_path or "")
+    if m and ("." in m.group(1) or ":" in m.group(1)):
+        return m.group(1), (m.group(2) or "/")
+    return "", url_or_path or "/"
+
+
+def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "") -> List[str]:
+    """单个漏洞详情（对齐 SRC 提交模板:漏洞地址/漏洞等级/详细说明/漏洞证明/修复方案；
+    Payload 与响应均为原始 HTTP 数据包——可直接重放复现，非 curl 命令）。"""
     level, icon = _risk_of(f)
     lines = [f"### 漏洞{i}：{f.get('title') or '(未命名)'}", ""]
-    lines.append(f"**风险等级**: {icon} {level}")
-    lines.append("")
-    lines.append(f"**漏洞类型**: {f.get('type') or '未标注'} | **状态**: {f.get('status') or 'CONFIRMED'}")
+    lines.append(f"**漏洞等级**: {icon} {level} | **漏洞类型**: {f.get('type') or '未标注'} | "
+                 f"**状态**: {f.get('status') or 'CONFIRMED'}"
+                 + (f" | **涉及业务**: {note}" if note else ""))
     lines.append("")
 
     evp = None
@@ -255,16 +383,47 @@ def _finding_detail(i: int, f: dict, job_dir: Path) -> List[str]:
             lines.append(f"> ⚠️ 证据检查未过: {reason}")
         if f.get("triage_reason"):
             lines.append(f"> ⚠️ triage 硬门: {f['triage_reason']}")
+        if f.get("format_error"):
+            lines.append(f"> ⚠️ 格式异常: {f['format_error']}")
         lines.append("")
 
     ev_text = evp.read_text(encoding="utf-8", errors="replace") if evp and evp.is_file() else ""
 
-    # 危害描述（影响,SRC 提交必需）
-    impact = _impact_from_evidence(ev_text) or f.get("title") or ""
-    lines.append(f"**危害描述**: {impact}")
+    # 一、漏洞地址
+    lines.append("#### 一、漏洞地址")
+    lines.append("")
+    urls = _evidence_urls(ev_text)
+    if urls:
+        for u in urls:
+            lines.append(f"- `{u}`")
+    else:
+        lines.append("- 见「四、漏洞证明」数据包中的请求行")
     lines.append("")
 
-    # 接口地址(Target)
+    # 二、漏洞等级
+    lines.append("#### 二、漏洞等级")
+    lines.append("")
+    lines.append(f"{icon} **{level}**（机器按漏洞类型关键词推断，提交前按平台收录标准人工校准）")
+    lines.append("")
+
+    # 三、详细说明（涉及业务 / 危害描述 / 漏洞细节全文）
+    lines.append("#### 三、详细说明")
+    lines.append("")
+    if note:
+        lines.append(f"**涉及业务**: {note}")
+        lines.append("")
+    impact = _impact_from_evidence(ev_text)
+    lines.append(f"**危害描述**: {impact or '见证据文件中的响应差异与影响说明'}")
+    lines.append("")
+    if evp and evp.is_file():
+        lines.append("**漏洞细节（证据全文，含复现步骤与响应）**:")
+        lines.append("")
+        lines.append(_evidence_block(evp))
+        lines.append("")
+
+    # 四、漏洞证明（原始数据包——可直接重放）
+    lines.append("#### 四、漏洞证明")
+    lines.append("")
     urls = _evidence_urls(ev_text)
     if urls:
         lines.append("**【接口地址(Target)】**")
@@ -272,34 +431,32 @@ def _finding_detail(i: int, f: dict, job_dir: Path) -> List[str]:
         for u in urls:
             lines.append(f"- `{u}`")
         lines.append("")
-
-    # Payload 数据包(Raw)
-    raw = _evidence_raw_request(ev_text)
-    if raw:
-        lines.append("**【Payload数据包(Raw)】**")
+    req_raw, resp_raw = _raw_http_from_evidence(ev_text)
+    if not req_raw:
+        req_raw = _evidence_raw_request(ev_text)
+    if req_raw:
+        lines.append("**【Payload数据包(Raw)】**:")
         lines.append("")
         lines.append("```http")
-        lines.append(raw)
+        lines.append(req_raw)
         lines.append("```")
         lines.append("")
+    if not resp_raw:
+        resp_raw = _evidence_response(ev_text, limit=4000)
+    if resp_raw:
+        lines.append("**关键响应**:")
+        lines.append("")
+        lines.append(f"```\n{resp_raw}\n```")
+        lines.append("")
 
-    # 关键响应（提取响应部分作证明,不再全文内联——SRC 格式精炼）
-    if evp and evp.is_file():
-        resp = _evidence_response(ev_text)
-        if not resp:
-            resp = _evidence_block(evp, limit=2000)  # fallback:证据无响应段时截取
-        if raw:  # 有 Payload 时响应作为补充
-            lines.append("**关键响应**:")
-            lines.append("")
-            lines.append(f"```\n{resp}\n```")
-            lines.append("")
-
+    # 五、修复方案
+    lines.append("#### 五、修复方案")
+    lines.append("")
     lines.append(f"**【修复建议】**: {_fix_for(f)}")
     lines.append("")
     lines.append("---")
     lines.append("")
     return lines
-
 
 # ---------------------------------------------------------------- triage 硬门（源自 mastermind triage_gate 可机械化子集）
 
@@ -471,7 +628,7 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
                     if f.get("triage_reason") or f.get("format_error"):
                         continue
                     i += 1
-                    lines.extend(_finding_detail(i, f, job_dir))
+                    lines.extend(_finding_detail(i, f, job_dir, note=(s.get("note") or "")))
             lines.append("")
 
         # 降级/待复核：triage 未过 / FINDING 格式异常的条目单独列出（不占漏洞编号）
