@@ -191,13 +191,10 @@ XSModules.tasks = (() => {
   async function openReportModal(jobId) {
     let r;
     try {
+      // 每次点「报告」都先重新生成再展示——报告=summary+证据的即时投影,格式/内容永远最新
+      try { await XS.api("/api/tasks/report", { method: "POST", json: { job_id: jobId } }); } catch {}
       r = await XS.api(`/api/tasks/${jobId}/report`);
-    } catch {
-      try {
-        await XS.api("/api/tasks/report", { method: "POST", json: { job_id: jobId } });
-        r = await XS.api(`/api/tasks/${jobId}/report`);
-      } catch (e) { XS.toast("报告读取/生成失败: " + e.message, "error"); return; }
-    }
+    } catch (e) { XS.toast("报告读取/生成失败: " + e.message, "error"); return; }
     XS.reportModal(r.name, r.content);
   }
 
