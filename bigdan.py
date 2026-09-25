@@ -252,6 +252,7 @@ PHASE_READ_INDEX = {
     ],
     "report": [  # 收尾: 评级/报告视角
         ("agents/report/SKILL.md", "报告视角:triage 6 项检查"),
+        ("skills/vuln_report/SKILL.md", "SRC五段式报告写作:黄金攻击链/图位占位/三性评估/合规收尾"),
         ("references/rating-standard.md", "SRC 评级标准(报告对齐)"),
         ("references/src-rules/common.md", "跨平台公约:五家SRC共性(评级骨架/普遍不收清单/计数提交/测试纪律/时效)"),
         ("references/impact-escalation.md", "影响升级框架:影响写'能做什么'"),
@@ -1125,7 +1126,9 @@ def _finding_rank(f: dict) -> int:
 
 
 def extract_findings(log_text: str) -> List[dict]:
-    """提取 FINDING: type|title|file|status 行；type/title 为空的脏行丢弃（宁缺勿滥）。
+    """提取 FINDING: type|title|file|status[|chain] 行；type/title 为空的脏行丢弃（宁缺勿滥）。
+
+    第5字段 chain 可选=发现链摘要（黄金攻击链的"发现过程"原料），供报告复现手册组装。
 
     反引号容错：agent 常把整行包进 `` ` ``（行内代码），老版正则因此漏提取。
     格式异常策略（2026-09 加固）:标题截断/file 不合规/status 非法 → **降级为 PENDING
@@ -1144,7 +1147,10 @@ def extract_findings(log_text: str) -> List[dict]:
             "title": parts[1] if len(parts) > 1 else "",
             "file": parts[2] if len(parts) > 2 else "",
             "status": parts[3] if len(parts) > 3 else "CONFIRMED",
+            "chain": parts[4] if len(parts) > 4 else "",  # 第5字段可选:发现链摘要(哪个页面/JS→接口→怎么绕过)
         }
+        if len(parts) > 5:  # 超出5字段=粘行/污染,链摘要丢弃(标题内禁|已约定,出现即异常)
+            f["chain"] = ""
         if not f["type"] or not f["title"]:
             continue
         # 格式异常 → 降级 PENDING + 标注原因（不丢弃，进报告降级/待复核区）

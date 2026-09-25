@@ -290,6 +290,90 @@ def _status_badge(f: dict) -> str:
     }.get(st, st)
 
 
+# ---------------------------------------------------------------- 黄金攻击链素材提取
+
+def _evidence_section(text: str, names: tuple, limit: int = 1500) -> str:
+    """从证据提取约定小节（发现过程/防御证据/危害放大）——到下一小节标题或文件尾。"""
+    pat = "|".join(names)
+    lines = text.splitlines()
+    out, on = [], False
+    for ln in lines:
+        if not on:
+            if re.match(rf"^\s*\**\s*(?:{pat})\s*\**\s*[:：]", ln):
+                m = re.match(rf"^\s*\**\s*(?:{pat})\s*\**\s*[:：]\s*(.*)$", ln)
+                if m and m.group(1).strip():
+                    out.append(m.group(1).rstrip())
+                on = True
+            continue
+        # 已入节：下一小节标题（常见节名或"xxx:"裸标题行）即止
+        if re.match(r"^\s*\**\s*(?:标题|URL|漏洞类型|发现过程|防御证据|防御|危害放大|影响说明|影响|危害|复现请求|复现步骤|关键响应|验证)\s*\**\s*[:：]", ln):
+            break
+        s = ln.strip()
+        if s and not s.startswith(("-", "*", "•", "→")) and re.match(r"^.{1,12}[:：]$", s):
+            break
+        if s:
+            out.append(ln.rstrip())
+    block = "\n".join(out).strip()
+    if not block:
+        return ""
+    return block[:limit] + ("\n...(截断)" if len(block) > limit else "")
+
+
+_TRIAD_HINTS = [
+    ("机密性", r"泄露|泄漏|读取|获取|导出|遍历|枚举|敏感|手机号|身份证|密钥|凭据|token|订单|用户数据"),
+    ("完整性", r"写入|修改|篡改|删除|上传|伪造|覆盖|冒充|绑定|重置"),
+    ("可用性", r"中断|瘫痪|拒绝服务|耗尽|轰炸|接管|钓鱼|跳转|劫持"),
+]
+# 类型 → 典型三性话术（影响文本未实证该性时给"典型影响"提示，不编造实证）
+_TRIAD_BY_TYPE: List[Tuple[Tuple[str, ...], dict]] = [
+    (("越权", "idor"), {"机密性": "越权读取他人/全量业务数据；若对象 ID 可遍历则影响随 ID 空间扩展。"}),
+    (("未授权", "信息泄露", "泄露", "敏感信息"), {"机密性": "未授权方直接获取受保护数据；规模取决于接口分页/遍历能力。"}),
+    (("上传",), {"完整性": "攻击者可向服务器存储写入任意内容，若落地域可达可进一步钓鱼/存储型 XSS。"}),
+    (("sql", "rce", "命令执行", "ssti", "反序列化"), {
+        "机密性": "可读取数据库/服务器内任意可达数据。",
+        "完整性": "可写入/篡改数据甚至获得系统控制权。",
+        "可用性": "极端情况可致服务瘫痪。"}),
+    (("无限流", "限流", "轰炸", "弱口令", "爆破"), {"可用性": "可对用户/接口形成骚扰或耗尽资源；弱口令命中即账号接管。"}),
+    (("重定向", "redirect"), {"可用性": "可构造恶意跳转实施钓鱼，稀释主站域名信誉。"}),
+]
+
+
+def _impact_triad(f: dict, ev_text: str, impact_text: str) -> List[str]:
+    """三性影响评估：影响文本实证命中 → 引用原句；类型典型但未实证 → 标注'典型影响'；否则未实证。"""
+    blob = f"{impact_text}\n{ev_text[:3000]}"
+    text = f"{f.get('type') or ''} {f.get('title') or ''}".lower()
+    defaults = {}
+    for keywords, triad in _TRIAD_BY_TYPE:
+        if any(kw.lower() in text for kw in keywords):
+            defaults = triad
+            break
+    lines = []
+    for dim, kw_re in _TRIAD_HINTS:
+        hit = ""
+        for ln in impact_text.splitlines():
+            s = ln.strip().lstrip("-*• ").strip()
+            if len(s) > 8 and re.search(kw_re, s, re.I):
+                hit = re.sub(r"\s+", " ", s)[:120]
+                break
+        if not hit and re.search(kw_re, blob[:2000], re.I):
+            m = re.search(rf"[^\n。；;]*{kw_re}[^\n。；;]*[。；;]?", blob[:2000], re.I)
+            if m:
+                hit = re.sub(r"\s+", " ", m.group(0)).strip()[:120]
+        if hit:
+            lines.append(f"- **{dim}**：{hit}")
+        elif dim in defaults:
+            lines.append(f"- **{dim}**（典型影响，本次未单独实证）：{defaults[dim]}")
+        else:
+            lines.append(f"- **{dim}**：本次未观察到直接实证（如有请人工补充）。")
+    return lines
+
+
+def _fig(fig_no: List[int], desc: str) -> str:
+    """图位占位：全局连续编号，写清该截什么图。"""
+    fig_no[0] += 1
+    return f"〔图{fig_no[0]}〕此处放图：{desc}"
+
+
 def _check_evidence(job_dir: Path, f: dict) -> tuple:
     """triage 证据检查:文件存在且内容 >20 字符才算完整。"""
     if not f.get("file"):
@@ -486,22 +570,25 @@ def _scope_expanded_hosts(job_dir: Path) -> dict:
     return out
 
 
-def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "") -> List[str]:
-    """单个漏洞详情——扁平四段，一段只说一件事、每项信息只出现一次：
+def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "", fig_no: List[int] = None,
+                     target_url: str = "") -> List[str]:
+    """单个漏洞详情——SRC 五段式黄金攻击链（对齐 skills/vuln_report），每项信息只出现一次：
 
-      标题 + 元信息行（等级/类型/状态徽标/业务）
-      一、漏洞地址
-      二、危害说明（从证据提取影响原文，兜底按类型话术——禁止"见证据文件"）
-      三、复现数据包（原始 HTTP 请求 + 关键响应，唯一出处，可直接重放）
-      四、修复方案
-
-    不再内联证据全文（其内容已拆入二/三），不再重复漏洞地址，不再嵌套小节。
+      标题（[资产]存在[漏洞类]，[最大危害]） + 元信息行
+      一、漏洞摘要（五要素 1~2 句）
+      二、受影响资产（具体端点 + scope 扩展域标注）
+      三、复现手册（发现过程→防御证据→复现数据包→危害放大→合规说明，含〔图〕占位）
+      四、风险影响评估（机密性/完整性/可用性 三性）
+      五、修复建议（原理性）
     """
+    if fig_no is None:
+        fig_no = [0]
     level, icon = _risk_of(f)
     title = _full_title(f, job_dir)
+    ftype = f.get("type") or "未标注"
     lines = [f"### 漏洞{i}：{title}", ""]
     meta = [f"**风险等级**: {icon} {level}（机器按类型关键词推断，提交前人工校准）",
-            f"**漏洞类型**: {f.get('type') or '未标注'}",
+            f"**漏洞类型**: {ftype}",
             f"**状态**: {_status_badge(f)}"]
     if note:
         meta.append(f"**涉及业务**: {note}")
@@ -513,10 +600,32 @@ def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "") -> List[str]
         evp = job_dir / "evidence" / Path(f["file"]).name
     ev_text = evp.read_text(encoding="utf-8", errors="replace") if evp and evp.is_file() else ""
 
-    # 一、漏洞地址
-    lines.append("#### 一、漏洞地址")
-    lines.append("")
     urls = _evidence_urls(ev_text)
+    impact_block = _impact_for(f, ev_text)
+    impact_line = _impact_from_evidence(ev_text)
+
+    # 一、漏洞摘要（五要素：系统+端点+漏洞类+能做什么+规模）
+    lines.append("#### 一、漏洞摘要")
+    lines.append("")
+    from urllib.parse import urlsplit
+    host = urlsplit(urls[0]).netloc if urls else ""
+    endpoint = urls[0] if urls else (f.get("file") and "见复现数据包" or "见复现数据包")
+    what = impact_line or impact_block.splitlines()[0].strip() if (impact_line or impact_block) else ""
+    what = re.sub(r"\s+", " ", what)[:160]
+    host_disp = host or (re.sub(r"^https?://", "", target_url or "").split("/")[0]) or "目标"
+    if what and not what.startswith(("该问题", "攻击者", "可")):
+        core_sentence = f"存在{ftype}漏洞，攻击者可 {what}。"
+    else:
+        core_sentence = f"存在{ftype}漏洞：{what}" if what else f"存在{ftype}漏洞。"
+    summary = (f"{host_disp} " if urls else f"{host_disp}") + (f"的 `{endpoint}` " if urls else "") + core_sentence
+    if f.get("chain"):
+        summary += f" 发现链：{f['chain']}"
+    lines.append(summary)
+    lines.append("")
+
+    # 二、受影响资产
+    lines.append("#### 二、受影响资产")
+    lines.append("")
     if urls:
         for u in urls:
             lines.append(f"- `{u}`")
@@ -524,7 +633,6 @@ def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "") -> List[str]
         lines.append("- 见下方复现数据包请求行")
     expanded = _scope_expanded_hosts(job_dir)
     if expanded and urls:
-        from urllib.parse import urlsplit
         hosts_hit = sorted({urlsplit(u).netloc.lower().split(":")[0] for u in urls
                             if urlsplit(u).netloc.lower().split(":")[0] in expanded})
         if hosts_hit:
@@ -534,18 +642,39 @@ def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "") -> List[str]
                          f"——提交前按平台收录范围人工核对归属（同根域≠一定在收录内，如 58 外包资产条款）。")
     lines.append("")
 
-    # 二、危害说明（证据影响原文 / 按类型话术，绝不含"见证据文件"）
-    lines.append("#### 二、危害说明")
-    lines.append("")
-    lines.append(_impact_for(f, ev_text))
+    # 三、复现手册（黄金攻击链）
+    lines.append("#### 三、复现手册")
     lines.append("")
 
-    # 三、复现数据包（原始 HTTP 请求 + 关键响应——全文唯一出处）
-    lines.append("#### 三、复现数据包")
+    # 1. 发现过程：FINDING 链摘要 > 证据"发现过程"节 > 兜底叙述
+    discovery = (f.get("chain") or "").strip() or _evidence_section(ev_text, ("发现过程", "发现链", "接口来源"))
+    lines.append("**1. 发现过程**")
     lines.append("")
+    if discovery:
+        lines.append(discovery)
+    else:
+        lines.append("经对该目标的 JS 全量采集与接口契约分析定位到本端点（来源详情见证据文件与复现数据包）。")
+    lines.append("")
+    lines.append(f"- {_fig(fig_no, '目标站点页面/登录页（证明系统真实在跑）')}")
+    lines.append("")
+
+    # 2. 防御证据（如有）
+    defense = _evidence_section(ev_text, ("防御证据", "防御", "绕过根因", "绕过原理"))
+    if defense:
+        lines.append("**2. 防御证据（先证明『本来有校验』）**")
+        lines.append("")
+        lines.append(defense)
+        lines.append("")
+        lines.append(f"- {_fig(fig_no, '未绕过前直接调接口被 401/403 拒绝的报错截图')}")
+        lines.append("")
+
+    # 3. 复现数据包（步骤号动态:有防御证据时顺延）
+    step = 3 if defense else 2
     req_raw, resp_raw = _raw_http_from_evidence(ev_text)
     if not req_raw:
         req_raw = _evidence_raw_request(ev_text)
+    lines.append(f"**{step}. 复现数据包（可直接重放）**")
+    lines.append("")
     if req_raw:
         lines.append("```http")
         lines.append(req_raw)
@@ -556,14 +685,43 @@ def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "") -> List[str]
     if resp_raw:
         lines.append("**关键响应**:")
         lines.append("")
-        lines.append(f"```\n{resp_raw}\n```")
+        lines.append("```")
+        lines.append(resp_raw)
+        lines.append("```")
+        lines.append("")
+        lines.append(f"- {_fig(fig_no, 'Burp/浏览器中该请求的响应，需能看到关键敏感字段')}")
         lines.append("")
     if not req_raw and not resp_raw:
         lines.append("> 该证据未提取到结构化请求/响应，请对照 evidence 目录原始文件复核。")
         lines.append("")
 
-    # 四、修复方案
-    lines.append("#### 四、修复方案")
+    # 4. 危害放大
+    amplify = _evidence_section(ev_text, ("危害放大", "放大", "批量证明", "遍历证明"))
+    lines.append(f"**{step+1}. 危害放大**")
+    lines.append("")
+    if amplify:
+        lines.append(amplify)
+    else:
+        lines.append(impact_block or _impact_for(f, ev_text))
+    lines.append("")
+    lines.append(f"- {_fig(fig_no, '遍历/批量/全量数据的列表截图（证明非偶发一条）')}")
+    lines.append("")
+
+    # 5. 合规说明（固定措辞）
+    lines.append(f"**{step+2}. 合规说明**")
+    lines.append("")
+    lines.append("本次为授权范围内测试，仅做可读/最小化证明（验证数据不超过 5 条），未实际执行写操作与批量导出；"
+                 "涉及的个人敏感数据已做脱敏处理，测试账号与会话已还原。")
+    lines.append("")
+
+    # 四、风险影响评估（三性）
+    lines.append("#### 四、风险影响评估")
+    lines.append("")
+    lines.extend(_impact_triad(f, ev_text, impact_block or impact_line))
+    lines.append("")
+
+    # 五、修复建议
+    lines.append("#### 五、修复建议")
     lines.append("")
     lines.append(_fix_for(f))
     lines.append("")
@@ -617,12 +775,15 @@ def _apply_triage_gate(summaries: List[dict], jobs_dir: Path) -> int:
 
 def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> None:
     demoted = _apply_triage_gate(summaries, jobs_dir)
+    fig_no = [0]  # 图位全局连续编号
 
     lines: List[str] = []
     lines.append("# 渗透测试报告")
     lines.append("")
     lines.append(f"**生成时间** {datetime.now().strftime('%Y-%m-%d %H:%M')} · **目标数** {len(summaries)} · "
                  f"**方式** 黑盒（仅凭输入 URL） · **范围** 仅测试清单内目标，禁止越界")
+    lines.append("")
+    lines.append("> 文中〔图n〕为图位占位标记，请按各处说明截图后替换再提交。")
     lines.append("")
 
     def _count(status: str) -> int:
@@ -736,7 +897,8 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
                     if f.get("triage_reason") or f.get("format_error"):
                         continue
                     i += 1
-                    lines.extend(_finding_detail(i, f, job_dir, note=(s.get("note") or "")))
+                    lines.extend(_finding_detail(i, f, job_dir, note=(s.get("note") or ""), fig_no=fig_no,
+                                                 target_url=(s.get("url") or "")))
             lines.append("")
 
         # 降级/待复核：triage 未过 / FINDING 格式异常的条目单独列出（不占漏洞编号）

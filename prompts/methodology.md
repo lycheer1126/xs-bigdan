@@ -291,7 +291,7 @@
 | knowledge/references/vue-spa-attacks.md | Vue 检测到(路由穷举/守卫绕过/Store) |
 | knowledge/references/cloud-attack-surface.md | OSS/S3/COS URL 命中(AK/SK 利用链) |
 | knowledge/references/miniprogram-analysis.md | 目标有小程序 |
-| knowledge/references/report_templates.md | Phase 5 报告模板 |
+| knowledge/skills/vuln_report/SKILL.md | Phase 5 报告写作(五段式/黄金攻击链/图位/三性) |
 | knowledge/references/bypass_techniques.md | LAST RESORT(仅高价值被 WAF 挡时) |
 | knowledge/references/bug_classes.md | Phase 5 十大漏洞类 |
 | knowledge/references/hunt_methodology.md | 完整方法论兜底 |
