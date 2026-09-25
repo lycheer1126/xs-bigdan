@@ -276,17 +276,22 @@ def _full_title(f: dict, job_dir: Path) -> str:
 
 
 def _status_badge(f: dict) -> str:
-    """状态徽标：确认/降级/待确认/信息，一眼可辨——降级项必须带原因摘要。"""
+    """状态徽标——降级必须写明"从什么状态降到什么状态"。
+    降级语义澄清：降级 ≠ 误报判定。原 CONFIRMED 被 triage 机械检查打回 PENDING，
+    意思是"证据链不完整、不能自动盖章为可提交"，需人工补证/复核后定性；洞本身可能真实存在。
+    风险等级（高危/中危/低危）是另一维度（_risk_of 按类型推断），降级不改变它。"""
     if f.get("triage_reason"):
         r = str(f["triage_reason"]).strip()
-        return f"⚠️ **已降级**（{r[:40]}{'…' if len(r) > 40 else ''}）"
+        return (f"⚠️ **已降级**（状态: ✅CONFIRMED → ⏳PENDING待人工复核，风险推断不变；"
+                f"非误报判定，机械检查未过: {r[:60]}{'…' if len(r) > 60 else ''}；补齐证据后可恢复可提交）")
     if f.get("format_error"):
-        return "⚠️ **已降级**（FINDING 格式异常，待人工复核）"
+        return ("⚠️ **已降级**（状态: ✅CONFIRMED → ⏳PENDING待人工复核，风险推断不变；"
+                "FINDING 行格式异常，证据可能已正常落盘，核对 evidence/ 后可定性）")
     st = f.get("status") or "CONFIRMED"
     return {
-        "CONFIRMED": "✅ **已确认**（CONFIRMED，证据完整可提交）",
-        "PENDING": "⏳ **待确认**（PENDING，尚未闭环）",
-        "INFO": "ℹ️ **信息**（INFO，多数平台不收）",
+        "CONFIRMED": "✅ **已确认**（CONFIRMED，证据链完整，可直接提交）",
+        "PENDING": "⏳ **待确认**（PENDING，agent 自报未闭环，人工复核定性）",
+        "INFO": "ℹ️ **信息**（INFO，记录性质，多数平台不收）",
     }.get(st, st)
 
 
@@ -369,9 +374,9 @@ def _impact_triad(f: dict, ev_text: str, impact_text: str) -> List[str]:
 
 
 def _fig(fig_no: List[int], desc: str) -> str:
-    """图位占位：全局连续编号，写清该截什么图。"""
+    """图位占位：全局连续编号，写清该截什么图 + 怎么截（VPS 无头环境不自动截图，人工补图指引）。"""
     fig_no[0] += 1
-    return f"〔图{fig_no[0]}〕此处放图：{desc}"
+    return f"〔图{fig_no[0]}〕此处放图：{desc}（获取：本地浏览器复现该步时截屏）"
 
 
 def _check_evidence(job_dir: Path, f: dict) -> tuple:
@@ -653,7 +658,8 @@ def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "", fig_no: List
     if discovery:
         lines.append(discovery)
     else:
-        lines.append("经对该目标的 JS 全量采集与接口契约分析定位到本端点（来源详情见证据文件与复现数据包）。")
+        lines.append("对该目标的 JS 全量采集与接口契约分析命中本端点；该任务未按新证据协议留档来源链"
+                     "（页面/JS→接口），补图时可一并人工补充发现过程。")
     lines.append("")
     lines.append(f"- {_fig(fig_no, '目标站点页面/登录页（证明系统真实在跑）')}")
     lines.append("")
@@ -783,7 +789,8 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
     lines.append(f"**生成时间** {datetime.now().strftime('%Y-%m-%d %H:%M')} · **目标数** {len(summaries)} · "
                  f"**方式** 黑盒（仅凭输入 URL） · **范围** 仅测试清单内目标，禁止越界")
     lines.append("")
-    lines.append("> 文中〔图n〕为图位占位标记，请按各处说明截图后替换再提交。")
+    lines.append("> 文中〔图n〕为人工补图指引（VPS 无头环境不自动截图）：按各占位说明在本地复现时截取并替换；"
+                 "标注『可选』的图位可省略，不影响提交。")
     lines.append("")
 
     def _count(status: str) -> int:
@@ -904,6 +911,10 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
         # 降级/待复核：triage 未过 / FINDING 格式异常的条目单独列出（不占漏洞编号）
         if demoted:
             lines.append("### 降级/待复核（triage 硬门未过或 FINDING 格式异常，已从漏洞详情移除）")
+            lines.append("")
+            lines.append("> **降级语义**：以下条目均从 ✅CONFIRMED 降为 ⏳PENDING（风险推断不变）。"
+                         "降级 ≠ 误报——是证据链机械检查未过（缺 URL/缺影响描述/格式异常），"
+                         "洞可能真实存在，人工补齐证据或核对 evidence/ 后即可恢复可提交。")
             lines.append("")
             for f in demoted:
                 reason = f.get("triage_reason") or f.get("format_error") or ""
