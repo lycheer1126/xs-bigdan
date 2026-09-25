@@ -170,7 +170,7 @@ def _evidence_response(text: str, limit: int = 1500) -> str:
     其次:HTTP 状态行起的响应块(限 8 行,防带入后续段落);上限 limit。
     """
     m = re.search(
-        r"(?:关键)?响应\s*[:：]?\s*[^\n]*\n(.*?)(?=\n\s*(?:验证|影响|危害|修复|curl|上传后|可直接访问|GET https|HTTP/|\Z))",
+        r"(?:关键)?响应[ \t]*[:：]?[ \t]*[^\n]*\n(.*?)(?=\n[ \t]*(?:验证|影响|危害|修复|curl|上传后|可直接访问|GET https|HTTP/|\Z))",
         text, re.S)
     if m:
         sec = m.group(1).strip()
@@ -531,9 +531,10 @@ def _evidence_raw_request(text: str) -> str:
     if req:
         return req
     for m in re.finditer(
-            r"(?m)(?:^\s*(?:请求|Request|Payload)\s*[:：]\s*)?"
+            r"(?m)(?:^\s*(?:复现)?(?:请求|Request|Payload)\s*[:：][ \t]*)?"
             r"((?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+(?:\s+HTTP/\d(?:\.\d)?)?\n"
-            r"(?:[A-Za-z0-9-]+:\s*[^\n]*\n)*)(?:\n|\Z)", text):
+            r"(?:(?!(?:关键响应|响应[:：]|发现过程|防御证据|危害放大|影响说明|标题))"
+            r"[A-Za-z0-9-]+:\s*[^\n]*\n)*)", text):
         block = m.group(1).strip()
         if len(block) > 40:
             head_parts = block.split("\n", 1)[0].split()
@@ -618,13 +619,14 @@ def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "", fig_no: List
     what = impact_line or impact_block.splitlines()[0].strip() if (impact_line or impact_block) else ""
     what = re.sub(r"\s+", " ", what)[:160]
     host_disp = host or (re.sub(r"^https?://", "", target_url or "").split("/")[0]) or "目标"
-    if what and not what.startswith(("该问题", "攻击者", "可")):
-        core_sentence = f"存在{ftype}漏洞，攻击者可 {what}。"
+    if what and len(what) <= 50 and not what.startswith(("该问题", "攻击者", "可", "该")) and "攻击者" not in what:
+        core_sentence = f"存在{ftype}漏洞，攻击者可 {what.rstrip('。')}。"
     else:
-        core_sentence = f"存在{ftype}漏洞：{what}" if what else f"存在{ftype}漏洞。"
+        # 话术整句(自带主语)或超长 → 冒号引出;句尾保证单句号
+        core_sentence = f"存在{ftype}漏洞：{what.rstrip('。')}。" if what else f"存在{ftype}漏洞。"
     summary = (f"{host_disp} " if urls else f"{host_disp}") + (f"的 `{endpoint}` " if urls else "") + core_sentence
     if f.get("chain"):
-        summary += f" 发现链：{f['chain']}"
+        summary += f"发现链：{f['chain']}"
     lines.append(summary)
     lines.append("")
 
