@@ -170,7 +170,7 @@ def _evidence_response(text: str, limit: int = 1500) -> str:
     其次:HTTP 状态行起的响应块(限 8 行,防带入后续段落);上限 limit。
     """
     m = re.search(
-        r"(?:关键)?响应[ \t]*[:：]?[ \t]*[^\n]*\n(.*?)(?=\n[ \t]*(?:验证|影响|危害|修复|curl|上传后|可直接访问|GET https|HTTP/|\Z))",
+        r"(?:关键)?响应[ \t]*[:：]?[ \t]*[^\n]*\n(.*?)(?=\n[ \t]*(?:#{1,6}\s|验证|影响|危害|修复|curl|上传后|可直接访问|GET https|HTTP/|\Z))",
         text, re.S)
     if m:
         sec = m.group(1).strip()
@@ -593,6 +593,12 @@ def _evidence_raw_request(text: str) -> str:
             r"[A-Za-z0-9-]+:\s*[^\n]*\n)*)", text):
         block = m.group(1).strip()
         if len(block) > 40:
+            # 请求行尾部孤立右括号清理(agent 常写 "(POST ...)" 括号包裹形态)
+            first_nl = block.find("\n")
+            head_line = block if first_nl < 0 else block[:first_nl]
+            if head_line.endswith(")") and head_line.count("(") < head_line.count(")"):
+                fixed_head = head_line[:-1].rstrip()
+                block = fixed_head + (block[first_nl:] if first_nl > 0 else "")
             head_parts = block.split("\n", 1)[0].split()
             host, path = _split_target_host(head_parts[1] if len(head_parts) > 1 else "")
             if host:  # 绝对 URL 形态 → 重建为 路径 + Host(标准原始包形态)
@@ -633,7 +639,7 @@ def _scope_expanded_hosts(job_dir: Path) -> dict:
 
 
 def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "", fig_no: List[int] = None,
-                     target_url: str = "") -> List[str]:
+                     target_url: str = "", related_note: str = "") -> List[str]:
     """单个漏洞详情——SRC 五段式黄金攻击链（对齐 skills/vuln_report），每项信息只出现一次：
 
       标题（[资产]存在[漏洞类]，[最大危害]） + 元信息行
@@ -705,6 +711,8 @@ def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "", fig_no: List
             lines.append(f"> ⚠️ 本条含 **scope 扩展域**（{', '.join(hosts_hit)}，来源: "
                          f"{'; '.join(filter(None, (expanded.get(h, '') for h in hosts_hit))[:2]) or '见 _scope_expanded.json'}）"
                          f"——提交前按平台收录范围人工核对归属（同根域≠一定在收录内，如 58 外包资产条款）。")
+    if related_note:
+        lines.append(related_note.rstrip())
     lines.append("")
 
     # 三、复现手册（黄金攻击链）
@@ -962,14 +970,19 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
         if active:
             lines.append("### 漏洞详情")
             lines.append("")
-            i = 0
-            for st_key in ("CONFIRMED", "PENDING", "INFO"):
-                for f in by_status[st_key]:
-                    if f.get("triage_reason") or f.get("format_error"):
-                        continue
-                    i += 1
-                    lines.extend(_finding_detail(i, f, job_dir, note=(s.get("note") or ""), fig_no=fig_no,
-                                                 target_url=(s.get("url") or "")))
+            # 同族发现统计(两遍法):先编号,同证据文件的条目互相标注(提交时可合并)
+            file_group: dict = {}
+            for idx, f in enumerate(active, 1):
+                if f.get("file"):
+                    file_group.setdefault(f["file"], []).append(idx)
+            for idx, f in enumerate(active, 1):
+                related = ""
+                if f.get("file") and len(file_group.get(f["file"], [])) > 1:
+                    peers = [str(x) for x in file_group[f["file"]] if x != idx]
+                    related = (f"> 🔗 **同族发现**：与漏洞{'、'.join(peers)}共用同一证据文件（同族越权面），"
+                               f"提交时可按平台规则合并为一份报告。")
+                lines.extend(_finding_detail(idx, f, job_dir, note=(s.get("note") or ""), fig_no=fig_no,
+                                             target_url=(s.get("url") or ""), related_note=related))
             lines.append("")
 
         # 降级/待复核：triage 未过 / FINDING 格式异常的条目单独列出（不占漏洞编号）
