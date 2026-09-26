@@ -307,13 +307,22 @@ _ST_RE = re.compile(r"^(CONFIRMED|PENDING|INFO)(?![A-Za-z])")
 
 
 def recover_status(f: dict) -> dict:
-    """恢复粘行污染的 status(原地修改返回)。CONFIRMED 后面粘的叙述文字直接丢弃——
+    """恢复粘行污染的 status(原地修改返回),两条路:
+    ① status 本身粘了叙述("CONFIRMED Now let me...") → 取词首;
+    ② 存量 summary:status 已被旧代码洗成 PENDING,污染原文只在 format_error 文案里
+       ("状态字段异常('CONFIRMED ...')") → 从文案提取原判状态恢复。
     这能把'有真实证据但行尾粘了思考文字'的高价值发现从降级区救回主表(广交会案例)。"""
     st = f.get("status") or ""
     m = _ST_RE.match(st)
     if m and len(st) > len(m.group(1)):
         f["status"] = m.group(1)
         f.pop("format_error", None)  # 粘行已恢复,不再标记格式异常
+        return f
+    fe = f.get("format_error") or ""
+    m2 = re.search(r"状态字段异常[(]'?(CONFIRMED|PENDING|INFO)(?![A-Za-z])", fe)
+    if m2 and m2.group(1) != "PENDING":  # 被洗成 PENDING 的原判若为 CONFIRMED/INFO → 恢复原判
+        f["status"] = m2.group(1)
+        f.pop("format_error", None)
     return f
 
 
@@ -395,6 +404,7 @@ def _impact_triad(f: dict, ev_text: str, impact_text: str) -> List[str]:
             defaults = triad
             break
     lines = []
+    used_hits = set()
     for dim, kw_re in _TRIAD_HINTS:
         hit = ""
         for ln in impact_text.splitlines():
@@ -404,9 +414,13 @@ def _impact_triad(f: dict, ev_text: str, impact_text: str) -> List[str]:
                 break
         if not hit and re.search(kw_re, blob[:2000], re.I):
             m = re.search(rf"[^\n。；;]*{kw_re}[^\n。；;]*[。；;]?", blob[:2000], re.I)
-            if m:
+            if m and len(m.group(0).strip()) >= 12:  # 孤词级短匹配(如"伪造"两字)无信息量,弃用
                 hit = re.sub(r"\s+", " ", m.group(0)).strip()[:120]
+        if hit and hit in used_hits:
+            lines.append(f"- **{dim}**：与上述维度同源，无独立实证。")
+            continue
         if hit:
+            used_hits.add(hit)
             lines.append(f"- **{dim}**：{hit}")
         elif dim in defaults:
             lines.append(f"- **{dim}**（典型影响，本次未单独实证）：{defaults[dim]}")
@@ -658,7 +672,9 @@ def _finding_detail(i: int, f: dict, job_dir: Path, note: str = "", fig_no: List
     from urllib.parse import urlsplit
     host = urlsplit(urls[0]).netloc if urls else ""
     endpoint = urls[0] if urls else (f.get("file") and "见复现数据包" or "见复现数据包")
-    what = impact_line or impact_block.splitlines()[0].strip() if (impact_line or impact_block) else ""
+    blk_first = impact_block.splitlines()[0].strip() if impact_block else ""
+    imp_line_clean = impact_line.split("##")[0].strip() if impact_line else ""  # re.S 跨行抓取可能吞进"## 补充2"
+    what = blk_first or imp_line_clean
     what = re.sub(r"\s+", " ", what)[:160]
     host_disp = host or (re.sub(r"^https?://", "", target_url or "").split("/")[0]) or "目标"
     if what and len(what) <= 50 and not what.startswith(("该问题", "攻击者", "可", "该")) and "攻击者" not in what:
@@ -791,7 +807,8 @@ def _triage_check(finding: dict, ev_text: str) -> List[str]:
     reasons: List[str] = []
     if not (finding.get("type") or "").strip():
         reasons.append("无漏洞类型")
-    if not _URL_RE.search(ev_text or ""):
+    if not _URL_RE.search(ev_text or "") and not _evidence_raw_request(ev_text or ""):
+        # 原始包形态证据("POST /path HTTP/1.1 + Host:")同样证明目标明确,不再误判"无 URL"
         reasons.append("证据中无目标 URL")
     m = re.search(r"(?:影响|危害)\s*[:：]?\s*(.{5,})", ev_text or "", re.S)
     impact_desc = (m.group(1)[:300] if m else "").strip()
