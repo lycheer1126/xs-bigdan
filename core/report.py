@@ -208,7 +208,10 @@ def _impact_block(text: str, limit: int = 1200) -> str:
                 out.append(m.group(1).rstrip())
                 on = True
             continue
-        # 已进入影响块：遇到下一小节标题（额外发现/修复/复现等，或"xxx:"形态的裸标题行）即止
+        # 已进入影响块：遇到下一小节标题（额外发现/修复/复现等，或"xxx:"形态的裸标题行）即止;
+        # markdown 标题行(## 补充/### xxx)同样终止——防止"## 补充2"这类行漏进危害说明
+        if re.match(r"^\s*#{1,6}\s", ln):
+            break
         if re.match(r"^\s*[-*•]?\s*(?:额外发现|修复建议|修复方案|修复|备注|参考|复现请求|复现步骤|关键响应|验证方式|验证)\s*[:：]?", ln):
             break
         s = ln.strip()
@@ -273,6 +276,45 @@ def _full_title(f: dict, job_dir: Path) -> str:
                 if len(full) > len(t.rstrip(".…")):
                     return full
     return t or "(未命名)"
+
+
+# 垃圾 FINDING 行判定(权威实现;bigdan.extract_findings 延迟 import 复用):
+# agent 会把模板占位符/bash 命令片段/正则碎片当 FINDING 行打出来——这些是输出噪音不是洞,
+# 直接丢弃(与"格式异常降级"区分:有真实标题的坏行降级给人工,无语义的噪音消失)
+_GARBAGE_TOKENS = ("<标题>", "<漏洞类型>", "<证据文件名>", "<标题…", "<漏洞…",
+                   "sort -u", "tail -", "/dev/null", "session-*", "2>/dev/null",
+                   "grep ", "awk ", "xargs ", "baseURL:", "curl -", "| head")
+_GARBAGE_TITLE_RE = re.compile(r"^[\s\W]+$")  # 纯符号/无字母数字中文(如 "]+\**")
+
+
+def garbage_finding_reason(f: dict) -> str:
+    """垃圾行判定:返回丢弃理由,正常条目返回空串。"""
+    t_ = f.get("type") or ""
+    ti = f.get("title") or ""
+    blob = f"{t_} {ti}"
+    if "<标题>" in blob or "<漏洞类型>" in blob or "<证据文件名>" in blob:
+        return "模板占位符"
+    if _GARBAGE_TITLE_RE.match(ti):
+        return "无语义标题(正则碎片/符号)"
+    for tok in _GARBAGE_TOKENS:
+        if tok in blob:
+            return f"shell 片段/命令噪音({tok!r})"
+    return ""
+
+
+# 粘行恢复:存量 summary.json 里 status 可能是"CONFIRMED Now let me..."(agent 行尾续写思考)
+_ST_RE = re.compile(r"^(CONFIRMED|PENDING|INFO)(?![A-Za-z])")
+
+
+def recover_status(f: dict) -> dict:
+    """恢复粘行污染的 status(原地修改返回)。CONFIRMED 后面粘的叙述文字直接丢弃——
+    这能把'有真实证据但行尾粘了思考文字'的高价值发现从降级区救回主表(广交会案例)。"""
+    st = f.get("status") or ""
+    m = _ST_RE.match(st)
+    if m and len(st) > len(m.group(1)):
+        f["status"] = m.group(1)
+        f.pop("format_error", None)  # 粘行已恢复,不再标记格式异常
+    return f
 
 
 def _status_badge(f: dict) -> str:
@@ -766,6 +808,9 @@ def _apply_triage_gate(summaries: List[dict], jobs_dir: Path) -> int:
         job_dir = jobs_dir / s["id"]
         kept = []
         for f in s.get("findings", []):
+            if garbage_finding_reason(f):   # 存量 summary 的垃圾条目在此清退
+                continue
+            f = recover_status(f)            # 粘行 status 恢复(救回真实 CONFIRMED)
             if (f.get("status") or "CONFIRMED") == "CONFIRMED":
                 evp = job_dir / "evidence" / Path(f.get("file") or "_missing_").name
                 ev_text = evp.read_text(encoding="utf-8", errors="replace") if evp.is_file() else ""
@@ -922,7 +967,7 @@ def build_report(summaries: List[dict], report_path: Path, jobs_dir: Path) -> No
                 reason = f.get("triage_reason") or f.get("format_error") or ""
                 extra = ""
                 if f.get("format_error") and not f.get("triage_reason"):
-                    extra = "；证据文件可能已落盘（agent 打 FINDING 时格式坏了），请人工核对 evidence/ 目录"
+                    extra = "；证据可能已落盘，请核对 evidence/ 目录"
                 lines.append(f"- **{_full_title(f, job_dir)}**（类型: {f.get('type') or '未标注'}）"
                              f"—— {reason}{extra}"
                              + (f"；原证据文件: `{f['file']}`" if f.get("file") else ""))

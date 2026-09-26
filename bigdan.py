@@ -1125,6 +1125,16 @@ def _finding_rank(f: dict) -> int:
     return rank * 2 + (1 if f.get("file") else 0)
 
 
+def _garbage_reason(f: dict) -> str:
+    """垃圾 FINDING 行判定(实现在 core.report.garbage_finding_reason,单一权威)——
+    模板占位符/shell 片段/正则碎片不是洞,是 agent 输出噪音,返回丢弃理由;正常返回空串。"""
+    try:
+        from core.report import garbage_finding_reason
+    except Exception:
+        return ""
+    return garbage_finding_reason(f)
+
+
 def extract_findings(log_text: str) -> List[dict]:
     """提取 FINDING: type|title|file|status[|chain] 行；type/title 为空的脏行丢弃（宁缺勿滥）。
 
@@ -1153,22 +1163,24 @@ def extract_findings(log_text: str) -> List[dict]:
             f["chain"] = ""
         if not f["type"] or not f["title"]:
             continue
+        # 垃圾行直接丢弃(非洞,是输出噪音):模板占位符/shell片段/正则碎片——与"格式异常降级"区分
+        if _garbage_reason(f):
+            continue
+        # 粘行恢复:status 以合法词开头但粘了叙述(agent 在行尾续写思考) → 取词首,不降级
+        m_st = re.match(r"^(CONFIRMED|PENDING|INFO)(?![A-Za-z])", f["status"])
+        if m_st and len(f["status"]) > len(m_st.group(1)):
+            f["status"] = m_st.group(1)
         # 格式异常 → 降级 PENDING + 标注原因（不丢弃，进报告降级/待复核区）
         if "…" in f["title"] or len(f["title"]) > 120:
-            f["format_error"] = f"标题截断/超长({len(f['title'])}字符)——agent 输出格式异常,需人工复核"
-            f["file"], f["status"] = "", "PENDING"
+            # 标题截断但 file 通常完好 → 保留 file,报告层 _full_title 从证据找回全文
+            f["format_error"] = f"标题截断/超长({len(f['title'])}字符)——报告将从证据文件恢复完整标题"
+            f["status"] = "PENDING"
         elif not _FINDING_FILE_RE.match(f["file"]):
             f["format_error"] = f"证据文件名不合规({f['file'][:40]!r})——agent 把叙述句/标点混入 file 字段,需人工复核"
             f["file"], f["status"] = "", "PENDING"
         elif f["status"] not in ("CONFIRMED", "PENDING", "INFO"):
-            if len(parts) > 3:  # 显式 status 但非法（粘行/污染）→ 降级，不做默认归一化
-                f["format_error"] = f"状态字段异常({f['status'][:40]!r})——疑似多条 FINDING 粘行或字段污染,需人工复核"
-                # 仅清 status,保留 file——状态污染时证据文件名通常是完好的(wms 案例:
-                # file=02-xxx.txt 正确但 status 粘了"CONFIRMED 继续探测..."),保留才能
-                # 让报告降级区关联证据文件并展示复现步骤
-                f["status"] = "PENDING"
-            else:
-                f["status"] = "CONFIRMED"  # status 字段缺失 → 默认
+            f["format_error"] = f"状态字段异常({f['status'][:40]!r})——疑似多条 FINDING 粘行或字段污染,需人工复核"
+            f["status"] = "PENDING"
         if f not in out:
             out.append(f)
     return out
