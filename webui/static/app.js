@@ -196,15 +196,17 @@ const XS = (() => {
     }
   }
 
-  // ---- 主题: 经典白 / 青花白（localStorage 记忆） ----
+  // ---- 主题: 经典白 / 青花白 / 与狼共舞（localStorage 记忆） ----
   const THEME_KEY = "xb_theme";
+  const THEMES = ["classic", "porcelain", "wolf"];
+  const THEME_LABEL = { classic: "◦ 经典白", porcelain: "◈ 青花白", wolf: "☾ 与狼共舞" };
   function applyTheme(t, quiet) {
-    const porcelain = t === "porcelain";
-    document.documentElement.dataset.theme = porcelain ? "porcelain" : "";
+    if (!THEMES.includes(t)) t = "classic";
+    document.documentElement.dataset.theme = t === "classic" ? "" : t;
     try { localStorage.setItem(THEME_KEY, t); } catch {}
     const btn = document.getElementById("theme-toggle");
-    if (btn) btn.textContent = porcelain ? "◦ 经典白" : "◈ 青花白";
-    if (!quiet) toast(porcelain ? "已换上 · 青花白" : "已换回 · 经典白", "ok");
+    if (btn) btn.textContent = "→ " + (THEME_LABEL[THEMES[(THEMES.indexOf(t) + 1) % THEMES.length]]);
+    if (!quiet) toast("已换上 · " + (THEME_LABEL[t] || t).replace(/^[◦◈☾] /, ""), "ok");
   }
 
   // ---- 侧栏标语：每次进页面随机一句，点击可换 ----
@@ -238,7 +240,7 @@ const XS = (() => {
     try { saved = localStorage.getItem(THEME_KEY) || "classic"; } catch {}
     applyTheme(saved, true);
     document.getElementById("theme-toggle").addEventListener("click",
-      () => applyTheme(document.documentElement.dataset.theme === "porcelain" ? "classic" : "porcelain"));
+      () => applyTheme(THEMES[(THEMES.indexOf(document.documentElement.dataset.theme || "classic") + 1) % THEMES.length]));
     rotateSlogan();
     document.getElementById("slogan").addEventListener("click", rotateSlogan);
     await renderNav();
