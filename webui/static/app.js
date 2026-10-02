@@ -207,6 +207,7 @@ const XS = (() => {
     const btn = document.getElementById("theme-toggle");
     if (btn) btn.textContent = "→ " + (THEME_LABEL[THEMES[(THEMES.indexOf(t) + 1) % THEMES.length]]);
     if (!quiet) toast("已换上 · " + (THEME_LABEL[t] || t).replace(/^[◦◈☾] /, ""), "ok");
+    if (typeof rotateSlogan === "function") rotateSlogan();
   }
 
   // ---- 侧栏标语：每次进页面随机一句，点击可换 ----
@@ -220,10 +221,21 @@ const XS = (() => {
     "一段一世界 · 步步皆落盘",
     "预算烧在刃上",
   ];
+  const WOLF_SLOGANS = [
+    "与狼共舞 · 月下无影",
+    "双狼同行 · 攻守相济",
+    "狼行千里 · 步步落盘",
+    "雪原无痕 · 爪爪见血",
+    "月圆之夜 · 正好打洞",
+    "狼群纪律 · 一次只追一个目标",
+    "月光所至 · 爪下无冤",
+    "陪主人打猎 · 陪主人收工",
+  ];
   function rotateSlogan() {
     const el = document.getElementById("slogan");
     if (!el) return;
-    el.textContent = `「 ${SLOGANS[Math.floor(Math.random() * SLOGANS.length)]} 」`;
+    const pool = document.documentElement.dataset.theme === "wolf" ? WOLF_SLOGANS : SLOGANS;
+    el.textContent = `「 ${pool[Math.floor(Math.random() * pool.length)]} 」`;
   }
 
   async function boot() {
